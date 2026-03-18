@@ -1,0 +1,14 @@
+## Event
+Type: {event_type}
+{event_details}
+
+## Current Game State
+{state_summary}
+
+## Enabled Tasks
+{enabled_tasks}
+
+## Time Context
+Server time: {server_time}
+
+Please decide the best action.
