@@ -1,14 +1,43 @@
 version: '3.7'
 services:
-    ALAS:
-        network_mode: host
-        volumes:
-            - '.:/app/AzurLaneAutoScript:rw'
-            # - '../MAA:/app/MAA:rw'
-            - '/etc/localtime:/etc/localtime:ro'
-        container_name: 'alas'
-        image: 'alas'
-        build:
-            context: ./deploy/docker/
-            dockerfile: ./Dockerfile
-            # dockerfile: ./Dockerfile.cn
+  alas:
+    build:
+      context: ./deploy/docker/
+      dockerfile: ./Dockerfile
+    ports:
+      - "22267:22267"
+    volumes:
+      - '.:/app/AzurLaneAutoScript:rw'
+      - '/etc/localtime:/etc/localtime:ro'
+    environment:
+      - AI_SIDECAR_URL=http://sidecar:8484
+      - EMULATOR_SERIAL=${EMULATOR_SERIAL:-host.docker.internal:5555}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      sidecar:
+        condition: service_healthy
+    container_name: alas
+
+  sidecar:
+    build:
+      context: ./ai_sidecar
+      dockerfile: Dockerfile
+    ports:
+      - "8484:8484"
+    volumes:
+      - sidecar-data:/data
+      - ./ai_sidecar/prompts:/app/prompts:ro
+    environment:
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.openai.com/v1}
+      - AI_MODEL=${AI_MODEL:-gpt-4o}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8484/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    container_name: alas-sidecar
+
+volumes:
+  sidecar-data:
