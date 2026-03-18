@@ -13,6 +13,7 @@ from module.config.deep import deep_get, deep_set
 from module.exception import *
 from module.logger import logger
 from module.notify import handle_notify
+from module.ai_hook.hook import AISidecarClient
 
 
 class AzurLaneAutoScript:
@@ -26,6 +27,39 @@ class AzurLaneAutoScript:
         # Failure count of tasks
         # Key: str, task name, value: int, failure count
         self.failure_record = {}
+
+    def _apply_directive(self, directive):
+        """Apply an AI sidecar directive to the scheduler."""
+        if directive is None:
+            return
+        action = directive.get('action')
+        if action == 'reprioritize':
+            task_order = directive.get('task_order', [])
+            now = datetime.now()
+            for i, task_name in enumerate(task_order):
+                target = now + timedelta(seconds=i + 1)
+                key = f'{task_name}.Scheduler.NextRun'
+                self.config.modified[key] = target
+                logger.info(f'AI sidecar: reprioritize `{task_name}` to {target}')
+            try:
+                self.config.update()
+            except Exception as e:
+                logger.warning(f'Failed to apply reprioritize: {e}')
+        elif action == 'skip':
+            task_name = directive.get('task')
+            if task_name:
+                try:
+                    self.config.task_delay(minute=1440, task=task_name)
+                    logger.info(f'AI sidecar: skipping task `{task_name}` for 24h')
+                except Exception as e:
+                    logger.warning(f'Failed to skip task {task_name}: {e}')
+        elif action == 'pause':
+            reason = directive.get('reason', 'AI requested pause')
+            logger.warning(f'AI sidecar: pausing automation — {reason}')
+            if self.stop_event is not None:
+                self.stop_event.set()
+            else:
+                logger.warning('Pause requested but stop_event not available (standalone mode)')
 
     @cached_property
     def config(self):
@@ -77,6 +111,16 @@ class AzurLaneAutoScript:
         except (GameStuckError, GameTooManyClickError) as e:
             logger.error(e)
             self.save_error_log()
+            # Notify AI sidecar of stuck state
+            if hasattr(self, '_sidecar') and self._sidecar:
+                try:
+                    directive = self._sidecar.notify("unknown_state", {
+                        "screenshot": self._sidecar.screenshot_to_base64(self.device.image),
+                        "click_history": [str(c) for c in self.device.click_record],
+                    })
+                    self._apply_directive(directive)
+                except Exception:
+                    pass  # sidecar errors must never break ALAS
             logger.warning(f'Game stuck, {self.device.package} will be restarted in 10 seconds')
             logger.warning('If you are playing by hand, please stop Alas')
             self.config.task_call('Restart')
@@ -518,6 +562,15 @@ class AzurLaneAutoScript:
         logger.set_file_logger(self.config_name)
         logger.info(f'Start scheduler loop: {self.config_name}')
 
+        # Init AI sidecar
+        self._sidecar = None
+        try:
+            if getattr(self.config, 'AiSidecar_Enabled', False):
+                self._sidecar = AISidecarClient(self.config)
+                logger.info('AI sidecar enabled')
+        except Exception as e:
+            logger.warning(f'AI sidecar init failed: {e}')
+
         while 1:
             # Check update event from GUI
             if self.stop_event is not None:
@@ -537,6 +590,27 @@ class AzurLaneAutoScript:
                 self.config.task_call('Restart')
             # Get task
             task = self.get_next_task()
+            # AI sidecar: cycle_start (must be AFTER get_next_task which populates task lists)
+            if self._sidecar:
+                try:
+                    screenshot = None
+                    try:
+                        self.device.screenshot()
+                        screenshot = self._sidecar.screenshot_to_base64(self.device.image)
+                    except Exception:
+                        pass
+                    directive = self._sidecar.notify("cycle_start", {
+                        "pending_tasks": [str(t) for t in self.config.pending_task],
+                        "waiting_tasks": [str(t) for t in self.config.waiting_task],
+                        "screenshot": screenshot,
+                    })
+                    if directive and directive.get('action') == 'reprioritize':
+                        self._apply_directive(directive)
+                        task = self.get_next_task()
+                    else:
+                        self._apply_directive(directive)
+                except Exception:
+                    pass
             # Init device and change server
             _ = self.device
             self.device.config = self.config
@@ -552,9 +626,30 @@ class AzurLaneAutoScript:
             self.device.stuck_record_clear()
             self.device.click_record_clear()
             logger.hr(task, level=0)
+            _task_start = time.time()
             success = self.run(inflection.underscore(task))
+            _task_duration = time.time() - _task_start
             logger.info(f'Scheduler: End task `{task}`')
             self.is_first_task = False
+
+            # AI sidecar: task result
+            if self._sidecar:
+                try:
+                    if success:
+                        self._sidecar.notify("task_complete", {
+                            "task": task,
+                            "success": True,
+                            "duration": _task_duration,
+                        })
+                    else:
+                        directive = self._sidecar.notify("task_failed", {
+                            "task": task,
+                            "error": "task_returned_failure",
+                            "count": deep_get(self.failure_record, keys=task, default=0),
+                        })
+                        self._apply_directive(directive)
+                except Exception:
+                    pass
 
             # Check failures
             failed = deep_get(self.failure_record, keys=task, default=0)
