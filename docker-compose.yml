@@ -15,9 +15,22 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      ocr:
+        condition: service_started
       sidecar:
         condition: service_healthy
     container_name: alas
+
+  ocr:
+    build:
+      context: ./deploy/docker/
+      dockerfile: ./Dockerfile.ocr
+    platform: linux/amd64
+    ports:
+      - "22268:22268"
+    volumes:
+      - '.:/app/AzurLaneAutoScript:rw'
+    container_name: alas-ocr
 
   sidecar:
     build:

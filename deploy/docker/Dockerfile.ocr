@@ -1,0 +1,19 @@
+# docker build -t hgjazhgj/alas-ocr:latest -f Dockerfile.ocr .
+# OCR server container — runs under x86 emulation on arm64 hosts
+# because mxnet 1.6.0 has no native arm64 build.
+
+FROM --platform=linux/amd64 python:3.9-slim
+
+WORKDIR /app/AzurLaneAutoScript
+
+COPY requirements-ocr.txt /tmp/requirements-ocr.txt
+
+RUN apt update \
+ && apt install -y libgomp1 \
+ && pip install --upgrade pip \
+ && pip install --no-deps cnocr==1.2.2 \
+ && pip install -r /tmp/requirements-ocr.txt \
+ && rm /tmp/requirements-ocr.txt \
+ && rm -rf ~/.cache/pip
+
+CMD python -m module.ocr.rpc
