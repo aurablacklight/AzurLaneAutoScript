@@ -457,3 +457,7 @@ class GeneratedConfig:
 
     # Group `Storage`
     Storage_Storage = {}
+
+    # Group `AiSidecar`
+    AiSidecar_Enabled = False  # True, False
+    AiSidecar_SidecarUrl = 'http://sidecar:8484'
