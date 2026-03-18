@@ -1,0 +1,49 @@
+# AI Sidecar Configuration
+# All configuration is read from environment variables.
+# This file documents the available variables and their defaults.
+# No code parses this file.
+
+# -----------------------------------------------------------------------
+# AI Backend
+# -----------------------------------------------------------------------
+
+# Base URL of the OpenAI-compatible API endpoint (e.g., Ollama or LM Studio)
+AI_BASE_URL: "http://localhost:11434/v1"
+
+# API key (use any non-empty string for local backends)
+AI_API_KEY: "ollama"
+
+# Model identifier to use for consultations
+AI_MODEL: "llama3"
+
+# Request timeout in seconds
+AI_TIMEOUT: 30
+
+# Number of automatic retries on transient failures
+AI_MAX_RETRIES: 1
+
+# -----------------------------------------------------------------------
+# Sidecar Storage
+# -----------------------------------------------------------------------
+
+# Path to the JSON file where game state is persisted between restarts
+SIDECAR_STATE_FILE: "/tmp/sidecar_state.json"
+
+# Path to the rotating log file where AI decisions are recorded
+SIDECAR_DECISION_LOG: "/tmp/sidecar_decisions.log"
+
+# Directory containing prompt template files (system.txt, user_template.txt)
+SIDECAR_PROMPTS_DIR: "./prompts"
+
+# -----------------------------------------------------------------------
+# Consultation Policy
+# -----------------------------------------------------------------------
+
+# Comma-separated list of event types that trigger an AI consultation.
+# Valid values: cycle_start, task_complete, task_failed, unknown_state
+# Default consults on cycle_start, task_failed, and unknown_state.
+SIDECAR_CONSULT_ON: "cycle_start,task_failed,unknown_state"
+
+# Minimum seconds between consecutive AI consultations for cycle_start events.
+# Prevents spamming the AI when cycles complete rapidly.
+SIDECAR_COOLDOWN: 60
