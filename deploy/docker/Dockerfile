@@ -11,10 +11,11 @@ WORKDIR /app/AzurLaneAutoScript
 COPY requirements.txt /tmp/requirements.txt
 
 RUN apt update \
- && apt install -y git adb libgomp1 openssh-client \
+ && apt install -y git adb libgomp1 openssh-client gcc g++ python3-dev libev-dev libffi-dev autoconf automake libtool make \
  && git config --global --add safe.directory '*' \
  && pip install --upgrade pip \
  && pip install --no-deps cnocr==1.2.2 \
+ && GEVENT_NO_CARES_BUILD=1 pip install gevent \
  && pip install -r /tmp/requirements.txt \
  && rm /tmp/requirements.txt \
  && rm -rf ~/.cache/pip

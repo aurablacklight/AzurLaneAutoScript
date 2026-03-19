@@ -1,11 +1,17 @@
 # Minimal dependencies for the OCR server container.
 # mxnet 1.6.0 only runs on x86, so this container is always linux/amd64.
-numpy==1.19.5
-mxnet==1.6.0
-gluoncv==0.6.0
+numpy==1.23.5
+mxnet==1.9.1
+# cnocr installed with --no-deps in Dockerfile (numpy<1.20 constraint conflict)
+# gluoncv installed with --no-deps too (pulls mxnet transitively)
 pillow
 opencv-python-headless
 zerorpc==0.6.3
 pyzmq==22.3.0
 gevent
 msgpack
+rich==11.2.0
+pyyaml
+cached_property
+inflection
+pydantic

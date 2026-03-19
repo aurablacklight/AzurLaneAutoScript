@@ -1,6 +1,6 @@
 # docker build -t hgjazhgj/alas-ocr:latest -f Dockerfile.ocr .
-# OCR server container — runs under x86 emulation on arm64 hosts
-# because mxnet 1.6.0 has no native arm64 build.
+# OCR server container — runs under x86 emulation (Rosetta) on arm64 hosts.
+# mxnet 1.9.1 works under Rosetta; older 1.6.0 does not.
 
 FROM --platform=linux/amd64 python:3.9-slim
 
@@ -9,9 +9,10 @@ WORKDIR /app/AzurLaneAutoScript
 COPY requirements-ocr.txt /tmp/requirements-ocr.txt
 
 RUN apt update \
- && apt install -y libgomp1 \
+ && apt install -y libgomp1 libquadmath0 libgfortran5 \
  && pip install --upgrade pip \
  && pip install --no-deps cnocr==1.2.2 \
+ && pip install --no-deps gluoncv==0.6.0 \
  && pip install -r /tmp/requirements-ocr.txt \
  && rm /tmp/requirements-ocr.txt \
  && rm -rf ~/.cache/pip

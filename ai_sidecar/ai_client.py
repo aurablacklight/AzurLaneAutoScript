@@ -55,7 +55,7 @@ class AIClient:
                 model=self.model,
                 messages=messages,
                 temperature=0.2,
-                max_tokens=256,
+                max_tokens=1024,
             )
 
             content = response.choices[0].message.content

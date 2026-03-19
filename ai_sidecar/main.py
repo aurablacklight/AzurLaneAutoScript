@@ -50,6 +50,7 @@ for _val in _consult_on_list:
             f"Valid values: {sorted(KNOWN_EVENT_TYPES)}"
         )
 CONSULT_ON: set = set(_consult_on_list)
+SEND_SCREENSHOT: bool = os.environ.get("SIDECAR_SEND_SCREENSHOT", "false").lower() in ("true", "1", "yes")
 
 # ---------------------------------------------------------------------------
 # Load prompt templates
@@ -155,7 +156,7 @@ def handle_event(event: EventPayload) -> dict:
     raw_response = ai_client.consult(
         system_prompt=SYSTEM_PROMPT,
         user_message=user_message,
-        screenshot_base64=state_manager.state.last_screenshot,
+        screenshot_base64=state_manager.state.last_screenshot if SEND_SCREENSHOT else None,
     )
 
     if raw_response is None:

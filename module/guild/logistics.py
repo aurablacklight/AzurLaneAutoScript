@@ -276,6 +276,7 @@ class GuildLogistics(GuildBase):
         exchange_interval = Timer(1.5, count=3)
         click_interval = Timer(0.5, count=1)
         supply_checked = False
+        supply_click_count = 0
         mission_checked = False
         exchange_checked = False
         exchange_count = 0
@@ -302,9 +303,15 @@ class GuildLogistics(GuildBase):
             if self._is_in_guild_logistics():
                 # Supply
                 if not supply_checked and self._guild_logistics_supply_available():
-                    if click_interval.reached():
+                    if supply_click_count >= 3:
+                        logger.warning('Guild supply clicked 3 times without success, likely insufficient resources')
+                        supply_checked = True
+                    elif click_interval.reached():
                         self.device.click(GUILD_SUPPLY)
+                        supply_click_count += 1
                         click_interval.reset()
+                        confirm_timer.reset()
+                        continue
                     confirm_timer.reset()
                     continue
                 else:
