@@ -487,14 +487,31 @@ class AzurLaneAutoScript:
         """
         future = future + timedelta(seconds=1)
         self.config.start_watching()
+        _idle_close_done = False
         while 1:
             if datetime.now() > future:
+                # If we closed the game during idle, schedule a Restart task
+                # so ALAS properly handles login, popups, and navigation
+                if _idle_close_done:
+                    logger.info('Game was closed during idle, scheduling Restart')
+                    self.config.task_call('Restart')
                 return True
             if self.stop_event is not None:
                 if self.stop_event.is_set():
                     logger.info("Update event detected")
                     logger.info(f"[{self.config_name}] exited. Reason: Update")
                     exit(0)
+
+            # Idle watchdog: close game if waiting too long
+            if not _idle_close_done and hasattr(self, '_idle_timeout'):
+                wait_remaining = (future - datetime.now()).total_seconds()
+                if wait_remaining > self._idle_timeout:
+                    logger.warning(f'Next task in {wait_remaining / 60:.0f} min, closing game to avoid detection')
+                    try:
+                        self.device.app_stop()
+                        _idle_close_done = True
+                    except Exception as e:
+                        logger.warning(f'Failed to close game for idle: {e}')
 
             time.sleep(5)
 
@@ -570,6 +587,9 @@ class AzurLaneAutoScript:
                 logger.info('AI sidecar enabled')
         except Exception as e:
             logger.warning(f'AI sidecar init failed: {e}')
+
+        # Idle watchdog: close game if waiting longer than this threshold
+        self._idle_timeout = 2 * 60 * 60  # 2 hours
 
         while 1:
             # Check update event from GUI
