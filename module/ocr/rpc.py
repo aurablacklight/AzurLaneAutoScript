@@ -1,6 +1,9 @@
 import argparse
+import base64
 import multiprocessing
 import pickle
+
+import requests
 
 from module.logger import logger
 from module.webui.setting import State
@@ -8,34 +11,62 @@ from module.webui.setting import State
 process: multiprocessing.Process = None
 
 
+def _encode_image(img_fp):
+    """Encode numpy array as base64 PNG for HTTP transport.
+
+    Args:
+        img_fp (np.ndarray): Image array (grayscale or color).
+
+    Returns:
+        str: Base64-encoded PNG string.
+    """
+    import cv2
+    _, buf = cv2.imencode('.png', img_fp)
+    return base64.b64encode(buf).decode('ascii')
+
+
 class ModelProxy:
-    client = None
+    base_url = None
     online = True
+    timeout = 10  # seconds, slightly higher than old ZeroRPC 5s to account for model cold-load
 
     @classmethod
-    def init(cls, address="127.0.0.1:22268"):
-        import zerorpc
-
-        logger.info(f"Connecting to OCR server {address}")
-        cls.client = zerorpc.Client(timeout=5)
-        cls.client.connect(f"tcp://{address}")
+    def init(cls, address="127.0.0.1:8484"):
+        logger.info(f"Connecting to OCR server at http://{address}")
+        cls.base_url = f"http://{address}/ocr/recognize"
         try:
-            cls.client.hello()
-            logger.info("Successfully connected to OCR server")
-        except:
+            resp = requests.get(f"http://{address}/health", timeout=3)
+            resp.raise_for_status()
+            logger.info("Successfully connected to OCR server (HTTP)")
+        except Exception:
             cls.online = False
-            logger.warning("Ocr server not running")
+            logger.warning("OCR server not running (health check failed)")
 
     @classmethod
     def close(cls):
-        if cls.client is not None:
-            logger.info('Disconnect to OCR server')
-            cls.client.close()
-            logger.info('Successfully disconnected to OCR server')
-            cls.client = None
+        if cls.base_url is not None:
+            logger.info('Disconnecting from OCR server')
+            cls.base_url = None
+            logger.info('Successfully disconnected from OCR server')
 
     def __init__(self, lang) -> None:
         self.lang = lang
+
+    def _post(self, body):
+        """Send a POST request to the OCR endpoint and return parsed JSON.
+
+        Args:
+            body (dict): JSON request body.
+
+        Returns:
+            dict: Parsed JSON response.
+
+        Raises:
+            Exception: On any HTTP or parsing error (caught by callers to trigger fallback).
+        """
+        resp = requests.post(ModelProxy.base_url, json=body, timeout=ModelProxy.timeout)
+        resp.raise_for_status()
+        return resp.json()
 
     def ocr(self, img_fp):
         """
@@ -43,13 +74,15 @@ class ModelProxy:
             img_fp (np.ndarray):
 
         Returns:
-
+            list: List of character sequences (matching cnocr format).
         """
         if self.online:
-            img_str = img_fp.dumps()
             try:
-                return self.client("ocr", self.lang, img_str)
-            except:
+                body = {"image_b64": _encode_image(img_fp), "model": self.lang}
+                data = self._post(body)
+                # Return format: list of char-lists (caller joins each with ''.join)
+                return [r["text"] for r in data["results"]]
+            except Exception:
                 self.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).ocr(img_fp)
@@ -60,13 +93,14 @@ class ModelProxy:
             img_fp (np.ndarray):
 
         Returns:
-
+            str: Recognized text (iterable of chars for caller to join).
         """
         if self.online:
-            img_str = img_fp.dumps()
             try:
-                return self.client("ocr_for_single_line", self.lang, img_str)
-            except:
+                body = {"image_b64": _encode_image(img_fp), "model": self.lang}
+                data = self._post(body)
+                return data["results"][0]["text"]
+            except Exception:
                 self.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).ocr_for_single_line(img_fp)
@@ -77,25 +111,25 @@ class ModelProxy:
             img_list (list[np.ndarray]):
 
         Returns:
-
+            list: List of recognized texts (each iterable of chars).
         """
         if self.online:
-            img_str_list = [img_fp.dumps() for img_fp in img_list]
             try:
-                return self.client("ocr_for_single_lines", self.lang, img_str_list)
-            except:
+                body = {
+                    "images": [_encode_image(img) for img in img_list],
+                    "model": self.lang,
+                }
+                data = self._post(body)
+                return [r["text"] for r in data["results"]]
+            except Exception:
                 self.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).ocr_for_single_lines(img_list)
 
     def set_cand_alphabet(self, cand_alphabet: str):
-        if self.online:
-            try:
-                return self.client("set_cand_alphabet", self.lang, cand_alphabet)
-            except:
-                self.online = False
-        from module.ocr.models import OCR_MODEL
-        return OCR_MODEL.__getattribute__(self.lang).set_cand_alphabet(cand_alphabet)
+        # No-op: alphabet is now passed per-request in the HTTP body.
+        logger.debug("set_cand_alphabet is a no-op with HTTP OCR (alphabet passed per-request)")
+        return None
 
     def atomic_ocr(self, img_fp, cand_alphabet=None):
         """
@@ -104,13 +138,16 @@ class ModelProxy:
             cand_alphabet:
 
         Returns:
-
+            str: Recognized text (iterable of chars for caller to join).
         """
         if self.online:
-            img_str = img_fp.dumps()
             try:
-                return self.client("atomic_ocr", self.lang, img_str, cand_alphabet)
-            except:
+                body = {"image_b64": _encode_image(img_fp), "model": self.lang}
+                if cand_alphabet is not None:
+                    body["cand_alphabet"] = cand_alphabet
+                data = self._post(body)
+                return data["results"][0]["text"]
+            except Exception:
                 self.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).atomic_ocr(img_fp, cand_alphabet)
@@ -122,13 +159,16 @@ class ModelProxy:
             cand_alphabet:
 
         Returns:
-
+            str: Recognized text (iterable of chars for caller to join).
         """
         if self.online:
-            img_str = img_fp.dumps()
             try:
-                return self.client("atomic_ocr_for_single_line", self.lang, img_str, cand_alphabet)
-            except:
+                body = {"image_b64": _encode_image(img_fp), "model": self.lang}
+                if cand_alphabet is not None:
+                    body["cand_alphabet"] = cand_alphabet
+                data = self._post(body)
+                return data["results"][0]["text"]
+            except Exception:
                 self.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).atomic_ocr_for_single_line(img_fp, cand_alphabet)
@@ -140,13 +180,19 @@ class ModelProxy:
             cand_alphabet:
 
         Returns:
-
+            list: List of recognized texts (each iterable of chars for caller to join).
         """
         if self.online:
-            img_str_list = [img_fp.dumps() for img_fp in img_list]
             try:
-                return self.client("atomic_ocr_for_single_lines", self.lang, img_str_list, cand_alphabet)
-            except:
+                body = {
+                    "images": [_encode_image(img) for img in img_list],
+                    "model": self.lang,
+                }
+                if cand_alphabet is not None:
+                    body["cand_alphabet"] = cand_alphabet
+                data = self._post(body)
+                return [r["text"] for r in data["results"]]
+            except Exception:
                 self.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).atomic_ocr_for_single_lines(img_list, cand_alphabet)
@@ -157,22 +203,16 @@ class ModelProxy:
             img_list (list[np.ndarray]):
 
         Returns:
-
+            list: Empty list (debug visualization not supported with HTTP OCR server).
         """
-        if self.online:
-            img_str_list = [img_fp.dumps() for img_fp in img_list]
-            try:
-                return self.client("debug", self.lang, img_str_list)
-            except:
-                self.online = False
-        from module.ocr.models import OCR_MODEL
-        return OCR_MODEL.__getattribute__(self.lang).debug(img_list)
+        logger.debug("debug() is not supported with HTTP OCR server")
+        return []
 
 
 class ModelProxyFactory:
     def __getattribute__(self, __name: str) -> ModelProxy:
         if __name in ["azur_lane", "cnocr", "jp", "tw", "azur_lane_jp"]:
-            if ModelProxy.client is None:
+            if ModelProxy.base_url is None:
                 ModelProxy.init(address=State.deploy_config.OcrClientAddress)
             return ModelProxy(lang=__name)
         else:
@@ -181,6 +221,9 @@ class ModelProxyFactory:
     def close(self):
         ModelProxy.close()
 
+
+# Legacy: ZeroRPC server functions. Not used when UseOcrServer points to Rust sidecar.
+# These are still needed if someone runs the old mxnet OCR server locally.
 
 def start_ocr_server(port=22268):
     import zerorpc
