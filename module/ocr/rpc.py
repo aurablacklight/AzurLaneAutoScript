@@ -83,7 +83,7 @@ class ModelProxy:
                 # Return format: list of char-lists (caller joins each with ''.join)
                 return [r["text"] for r in data["results"]]
             except Exception:
-                self.online = False
+                ModelProxy.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).ocr(img_fp)
 
@@ -101,7 +101,7 @@ class ModelProxy:
                 data = self._post(body)
                 return data["results"][0]["text"]
             except Exception:
-                self.online = False
+                ModelProxy.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).ocr_for_single_line(img_fp)
 
@@ -122,7 +122,7 @@ class ModelProxy:
                 data = self._post(body)
                 return [r["text"] for r in data["results"]]
             except Exception:
-                self.online = False
+                ModelProxy.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).ocr_for_single_lines(img_list)
 
@@ -148,7 +148,7 @@ class ModelProxy:
                 data = self._post(body)
                 return data["results"][0]["text"]
             except Exception:
-                self.online = False
+                ModelProxy.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).atomic_ocr(img_fp, cand_alphabet)
 
@@ -169,7 +169,7 @@ class ModelProxy:
                 data = self._post(body)
                 return data["results"][0]["text"]
             except Exception:
-                self.online = False
+                ModelProxy.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).atomic_ocr_for_single_line(img_fp, cand_alphabet)
 
@@ -193,7 +193,7 @@ class ModelProxy:
                 data = self._post(body)
                 return [r["text"] for r in data["results"]]
             except Exception:
-                self.online = False
+                ModelProxy.online = False
         from module.ocr.models import OCR_MODEL
         return OCR_MODEL.__getattribute__(self.lang).atomic_ocr_for_single_lines(img_list, cand_alphabet)
 
