@@ -10,27 +10,28 @@ services:
       - '.:/app/AzurLaneAutoScript:rw'
       - '/etc/localtime:/etc/localtime:ro'
     environment:
-      - AI_SIDECAR_URL=http://sidecar:8484
+      - AI_SIDECAR_URL=http://host.docker.internal:8484
+      - OCR_SERVER_URL=http://host.docker.internal:8484
       - EMULATOR_SERIAL=${EMULATOR_SERIAL:-host.docker.internal:5555}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      ocr:
-        condition: service_started
       sidecar:
         condition: service_healthy
     container_name: alas
 
-  ocr:
-    build:
-      context: ./deploy/docker/
-      dockerfile: ./Dockerfile.ocr
-    platform: linux/amd64
-    ports:
-      - "22268:22268"
-    volumes:
-      - '.:/app/AzurLaneAutoScript:rw'
-    container_name: alas-ocr
+  # OCR now handled by Rust sidecar on port 8484.
+  # Uncomment to use legacy mxnet/cnocr OCR server instead.
+  # ocr:
+  #   build:
+  #     context: ./deploy/docker/
+  #     dockerfile: ./Dockerfile.ocr
+  #   platform: linux/amd64
+  #   ports:
+  #     - "22268:22268"
+  #   volumes:
+  #     - '.:/app/AzurLaneAutoScript:rw'
+  #   container_name: alas-ocr
 
   sidecar:
     build:
