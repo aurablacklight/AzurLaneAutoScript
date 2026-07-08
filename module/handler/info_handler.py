@@ -118,7 +118,7 @@ class InfoHandler(ModuleBase):
             return True
         if self.appear(POPUP_CANCEL_WHITE, offset=offset, interval=interval):
             POPUP_CANCEL_WHITE.name = POPUP_CANCEL_WHITE.name + '_' + name
-            self.device.click(POPUP_CONFIRM_WHITE)
+            self.device.click(POPUP_CANCEL_WHITE)
             POPUP_CANCEL_WHITE.name = POPUP_CANCEL_WHITE.name[:-len(name) - 1]
             return True
         return False
@@ -203,24 +203,30 @@ class InfoHandler(ModuleBase):
             return False
 
         if self.appear(USE_DATA_KEY, offset=(20, 20)):
-            skip_first_screenshot = True
-            while 1:
-                if skip_first_screenshot:
-                    skip_first_screenshot = False
-                else:
-                    self.device.screenshot()
-
+            # enable USE_DATA_KEY_NOTIFIED
+            for _ in self.loop():
                 enabled = self.image_color_count(
                     USE_DATA_KEY_NOTIFIED, color=(140, 207, 66), threshold=180, count=10)
                 if enabled:
                     break
-
                 if self.appear(USE_DATA_KEY, offset=(20, 20), interval=5):
                     self.device.click(USE_DATA_KEY_NOTIFIED)
                     continue
 
             self.config.USE_DATA_KEY = False  # Reset on success as task can be stopped before can be recovered
-            return self.handle_popup_confirm('USE_DATA_KEY')
+
+            # click confirm
+            # POPUP_CONFIRM from data key page has minor differece from the standard one
+            # so we just bind clicking it
+            self.interval_clear(USE_DATA_KEY, interval=5)
+            for _ in self.loop():
+                if not self.appear(USE_DATA_KEY, offset=(20, 20)):
+                    break
+                if self.appear(USE_DATA_KEY, offset=(20, 20), interval=5):
+                    self.device.click(POPUP_CONFIRM)
+                    continue
+
+            return True
 
         return False
 
@@ -241,6 +247,24 @@ class InfoHandler(ModuleBase):
             bool:
         """
         return self.appear_then_click(GET_SKIN, offset=(20, 20), interval=2)
+
+    def handle_get_items_ship(self, drop=None):
+        """
+        2026.06.12 added different GET_ITEMS popup when getting ship
+
+        Args:
+            drop (DropImage):
+
+        Returns:
+            bool:
+        """
+        if self.appear(GET_ITEMS_SHIP_1, offset=5, interval=2):
+            if drop:
+                drop.handle_add(self)
+            self.device.click(GET_ITEMS_SHIP_1)
+            return True
+
+        return False
 
     """
     Guild popup info
@@ -340,11 +364,12 @@ class InfoHandler(ModuleBase):
             list[Button]: List of story options, from upper to bottom. If no option found, return an empty list.
         """
         # Area to detect the options, should include at least 3 options.
-        story_option_area = (330, 200, 980, 465)
-        story_detect_area = (330, 200, 355, 465)
+        story_option_area = (330, 135, 980, 555)
+        story_detect_area = (330, 135, 355, 555)
         story_option_color = (247, 247, 247)
 
         image = color_similarity_2d(self.image_crop(story_detect_area, copy=False), color=story_option_color)
+        cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel=np.ones((5, 5), dtype=np.uint8), dst=image)
         line = cv2.reduce(image, 1, cv2.REDUCE_AVG).flatten()
         line[line < 200] = 0
         line[line >= 200] = 255

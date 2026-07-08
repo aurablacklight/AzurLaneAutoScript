@@ -199,6 +199,10 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
                 if self.handle_use_data_key():
                     continue
 
+                # 16-1/16-2 submarine support popup
+                if self.handle_submarine_support_popup():
+                    continue
+
                 # Emotion
                 if self.handle_combat_low_emotion():
                     continue
@@ -231,6 +235,9 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
                         logger.warning('Entered map with is_combat_loading appeared')
                         break
                 else:
+                    if hasattr(self, 'is_combat_loading') and self.is_combat_loading():
+                        logger.warning('Entered map with is_combat_loading appeared')
+                        break
                     if self.handle_in_map_with_enemy_searching():
                         # self.handle_map_after_combat_story()
                         break
@@ -308,7 +315,7 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
             MAP_MODE_SWITCH_HARD5,
             MAP_MODE_SWITCH_HARD6,
         ]:
-            if self.appear(button, offset=(20, 20), threshold=0.7):
+            if self.appear(button, offset=(20, 20), similarity=0.7):
                 if active:
                     return self._is_mod_switch_hard_active(button)
                 else:

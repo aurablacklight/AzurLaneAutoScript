@@ -83,7 +83,7 @@
       "help": ""
     },
     "Coalition": {
-      "name": "特集写真-撮影進行中",
+      "name": "星霜海嵐",
       "help": ""
     },
     "MaritimeEscort": {
@@ -119,7 +119,7 @@
       "help": ""
     },
     "CoalitionSp": {
-      "name": "特集写真-撮影進行中SP",
+      "name": "星霜海嵐SP",
       "help": ""
     },
     "Commission": {
@@ -395,6 +395,7 @@
       "cn_channel-2": "[国服] 十字军行动",
       "cn_channel-3": "[国服] 龙骑兵行动",
       "cn_channel-4": "[国服] 冥王星行动",
+      "cn_channel-5": "[国服] 群岛计划",
       "en-0": "[EN] Avrora",
       "en-1": "[EN] Lexington",
       "en-2": "[EN] Sandy",
@@ -470,6 +471,7 @@
       "LDPlayer3": "LDPlayer3",
       "LDPlayer4": "LDPlayer4",
       "LDPlayer9": "LDPlayer9",
+      "LDPlayer14": "LDPlayer14",
       "MuMuPlayer": "MuMuPlayer",
       "MuMuPlayerX": "MuMuPlayerX",
       "MuMuPlayer12": "MuMuPlayer12",
@@ -705,7 +707,7 @@
       "event_20201002_en": "Counterattack Within the Fjord",
       "event_20201012_cn": "奔る彩帆の青（復刻）",
       "event_20201029_cn": "激唱のユニバース",
-      "event_20201126_cn": "バケーションレーン",
+      "event_20201126_cn": "バケーションレーン（復刻）",
       "event_20201229_cn": "虚畳なりし限象（復刻）",
       "event_20210121_cn": "悲歎せし焔海の詩（復刻）",
       "event_20210225_cn": "暁射す氷華の嵐（復刻）",
@@ -750,7 +752,7 @@
       "event_20231221_cn": "光追う星の海（復刻）",
       "event_20240229_cn": "銀界遊廻（復刻）",
       "event_20240425_cn": "共鳴のパッション",
-      "event_20240521_cn": "赫輝のマルティリウム",
+      "event_20240521_cn": "赫輝のマルティリウム（復刻）",
       "event_20240725_cn": "夢幻の間奏曲",
       "event_20240815_cn": "錬翼空翔",
       "event_20240829_cn": "徒花咲かす彼岸",
@@ -759,7 +761,7 @@
       "event_20241121_cn": "危険発明接近中",
       "event_20241219_cn": "星降る夕影の残光",
       "event_20250227_cn": "籠檻に囚われし神光",
-      "event_20250424_cn": "チュリッパの海へ",
+      "event_20250424_cn": "チュリッパの海へ（復刻）",
       "event_20250520_cn": "高い塔の薔薇",
       "event_20250724_cn": "錬金術士と天空邂逅の塔",
       "event_20250814_cn": "淵層界の秘密",
@@ -767,6 +769,10 @@
       "event_20251023_cn": "テンペスタと自由群島",
       "event_20251218_cn": "天穹に響く音謡",
       "event_20260226_cn": "春色旅籠Online",
+      "event_20260326_cn": "ワンダラー募集計画",
+      "event_20260417_cn": "バケーションレーン・きらめく砂浜",
+      "event_20260520_cn": "聖印前の同盟",
+      "event_20260625_cn": "幻夢のカヴァルカード",
       "raid_20200624": "特別演習超空強襲波（復刻）",
       "raid_20210708": "交錯する新たな波 (復刻)",
       "raid_20220127": "秘密事件調査",
@@ -818,10 +824,14 @@
       "war_archives_20220428_cn": "檔案 吟ずる瑠璃の楽章",
       "war_archives_20220526_cn": "檔案 诚閃の剣 搖光の城",
       "war_archives_20220728_cn": "檔案 鋼鷲の冒険譚",
+      "war_archives_20220818_cn": "檔案 結像点作戦",
       "war_archives_20220915_cn": "檔案 赫の涙月 菫の暁風",
       "war_archives_20221222_cn": "檔案 積重なる事象の幻界",
       "war_archives_20230223_cn": "檔案 黙示の遺構",
-      "war_archives_20231026_cn": "檔案 テンペスタと若返りの泉"
+      "war_archives_20230525_cn": "檔案 覆天せし万象の塵",
+      "war_archives_20230803_cn": "檔案 燃ゆる聖都の回想曲",
+      "war_archives_20231026_cn": "檔案 テンペスタと若返りの泉",
+      "war_archives_20240725_cn": "檔案 夢幻の間奏曲"
     },
     "Mode": {
       "name": "Campaign.Mode.name",
@@ -1323,10 +1333,11 @@
     "Mode": {
       "name": "Coalition.Mode.name",
       "help": "Coalition.Mode.help",
-      "easy": "easy",
-      "normal": "normal",
-      "hard": "hard",
-      "sp": "sp"
+      "tc1": "tc1",
+      "tc2": "tc2",
+      "tc3": "tc3",
+      "sp": "sp",
+      "ex": "ex"
     },
     "Fleet": {
       "name": "Coalition.Fleet.name",
@@ -1414,7 +1425,11 @@
       "help": ""
     },
     "Favorite": {
-      "name": "好ましい選択",
+      "name": "お気に入りのみ選択",
+      "help": ""
+    },
+    "MinLevel": {
+      "name": "レベルがX以上のキャラクターのみを追加してください。",
       "help": ""
     }
   },
@@ -1533,6 +1548,10 @@
     "FortChoreMeowfficer": {
       "name": "Meowfficer.FortChoreMeowfficer.name",
       "help": "Meowfficer.FortChoreMeowfficer.help"
+    },
+    "OverflowCoins": {
+      "name": "Meowfficer.OverflowCoins.name",
+      "help": "Meowfficer.OverflowCoins.help"
     }
   },
   "MeowfficerTrain": {
@@ -2088,7 +2107,8 @@
       "sirius": "sirius",
       "new_jersey": "new_jersey",
       "taihou": "taihou",
-      "aegir": "aegir"
+      "aegir": "aegir",
+      "nakhimov": "nakhimov"
     }
   },
   "Daily": {

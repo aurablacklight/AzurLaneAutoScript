@@ -69,6 +69,7 @@ EmulatorInfo:
       LDPlayer3,
       LDPlayer4,
       LDPlayer9,
+      LDPlayer14,
       MuMuPlayer,
       MuMuPlayerX,
       MuMuPlayer12,
@@ -216,7 +217,7 @@ Emotion:
     value: 2020-01-01 00:00:00
     display: disabled
   Fleet1Control:
-    value: prevent_yellow_face
+    value: prevent_green_face
     option: [ keep_exp_bonus, prevent_green_face, prevent_yellow_face, prevent_red_face ]
   Fleet1Recover:
     value: not_in_dormitory
@@ -227,7 +228,7 @@ Emotion:
     value: 2020-01-01 00:00:00
     display: disabled
   Fleet2Control:
-    value: prevent_yellow_face
+    value: prevent_green_face
     option: [ keep_exp_bonus, prevent_green_face, prevent_yellow_face, prevent_red_face ]
   Fleet2Recover:
     value: not_in_dormitory
@@ -305,8 +306,8 @@ MaritimeEscort:
   Enable: true
 Coalition:
   Mode:
-    value: hard
-    option: [ easy, normal, hard, sp ]
+    value: tc3
+    option: [ tc1, tc2, tc3, sp, ex ]
   Fleet:
     value: single
     option: [ single, multi ]
@@ -361,7 +362,8 @@ ControlExpOverflow:
   T1Allow: 200
 AddNewStudent:
   Enable: false
-  Favorite: true
+  Favorite: false
+  MinLevel: 50
 Research:
   UseCube:
     value: only_05_hour
@@ -420,6 +422,7 @@ BuyFurniture:
 Meowfficer:
   BuyAmount: 1
   FortChoreMeowfficer: true
+  OverflowCoins: -1
 MeowfficerTrain:
   Enable: false
   Mode:
@@ -588,7 +591,7 @@ PrivateQuarters:
     TargetInteract: true
     TargetShip:
       value: anchorage
-      option: [ anchorage, noshiro, sirius, new_jersey, taihou, aegir ]
+      option: [ anchorage, noshiro, sirius, new_jersey, taihou, aegir, nakhimov ]
 # ==================== Daily ====================
 
 Daily:
