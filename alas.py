@@ -28,7 +28,7 @@ class AzurLaneAutoScript:
         # Key: str, task name, value: int, failure count
         self.failure_record = {}
 
-    def _apply_directive(self, directive):
+    def _apply_directive(self, directive, task=None):
         """Apply an AI sidecar directive to the scheduler."""
         if directive is None:
             return
@@ -55,6 +55,13 @@ class AzurLaneAutoScript:
                     logger.warning(f'Failed to skip task {task_name}: {e}')
         elif action == 'pause':
             reason = directive.get('reason', 'AI requested pause')
+            if task is not None:
+                count = deep_get(self.failure_record, keys=task, default=0)
+                if count < 2:
+                    logger.warning(
+                        f'AI sidecar: pause requested but task \'{task}\' has only {count} '
+                        f'prior consecutive failure(s) — deferring to ALAS auto-recovery ({reason})')
+                    return
             logger.warning(f'AI sidecar: pausing automation — {reason}')
             if self.stop_event is not None:
                 self.stop_event.set()
@@ -114,11 +121,15 @@ class AzurLaneAutoScript:
             # Notify AI sidecar of stuck state
             if hasattr(self, '_sidecar') and self._sidecar:
                 try:
+                    task_name = inflection.camelize(command)
                     directive = self._sidecar.notify("unknown_state", {
                         "screenshot": self._sidecar.screenshot_to_base64(self.device.image),
                         "click_history": [str(c) for c in self.device.click_record],
+                        "task": task_name,
+                        "error": str(e),
+                        "count": deep_get(self.failure_record, keys=task_name, default=0),
                     })
-                    self._apply_directive(directive)
+                    self._apply_directive(directive, task=task_name)
                 except Exception:
                     pass  # sidecar errors must never break ALAS
             logger.warning(f'Game stuck, {self.device.package} will be restarted in 10 seconds')
@@ -667,7 +678,7 @@ class AzurLaneAutoScript:
                             "error": "task_returned_failure",
                             "count": deep_get(self.failure_record, keys=task, default=0),
                         })
-                        self._apply_directive(directive)
+                        self._apply_directive(directive, task=task)
                 except Exception:
                     pass
 
