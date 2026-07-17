@@ -27,6 +27,10 @@ class AzurLaneAutoScript:
         # Failure count of tasks
         # Key: str, task name, value: int, failure count
         self.failure_record = {}
+        # AI sidecar pause flag. Pause must stop only this scheduler run;
+        # it must NEVER touch stop_event, which is the GUI's shared updater
+        # event (setting it poisons every future Start until GUI restart).
+        self._ai_pause = False
 
     def _apply_directive(self, directive, task=None):
         """Apply an AI sidecar directive to the scheduler."""
@@ -63,10 +67,8 @@ class AzurLaneAutoScript:
                         f'prior consecutive failure(s) — deferring to ALAS auto-recovery ({reason})')
                     return
             logger.warning(f'AI sidecar: pausing automation — {reason}')
-            if self.stop_event is not None:
-                self.stop_event.set()
-            else:
-                logger.warning('Pause requested but stop_event not available (standalone mode)')
+            logger.warning('AI sidecar: current scheduler run will stop; press Start in the GUI to resume')
+            self._ai_pause = True
 
     @cached_property
     def config(self):
@@ -609,6 +611,11 @@ class AzurLaneAutoScript:
                     logger.info("Update event detected")
                     logger.info(f"Alas [{self.config_name}] exited.")
                     break
+            # AI sidecar pause: stop this scheduler run only
+            if self._ai_pause:
+                logger.warning('AI sidecar pause — scheduler loop stopped')
+                logger.info(f'Alas [{self.config_name}] exited.')
+                break
             # Check game server maintenance
             self.checker.wait_until_available()
             if self.checker.is_recovered():
@@ -642,6 +649,9 @@ class AzurLaneAutoScript:
                         self._apply_directive(directive)
                 except Exception:
                     pass
+                # Pause issued at cycle_start: jump to loop top, which breaks
+                if self._ai_pause:
+                    continue
             # Init device and change server
             _ = self.device
             self.device.config = self.config
