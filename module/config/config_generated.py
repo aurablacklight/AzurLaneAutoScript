@@ -460,4 +460,4 @@ class GeneratedConfig:
 
     # Group `AiSidecar`
     AiSidecar_Enabled = True  # True, False
-    AiSidecar_SidecarUrl = 'http://sidecar:8484'
+    AiSidecar_SidecarUrl = 'http://127.0.0.1:8484'
