@@ -16,6 +16,27 @@ from module.notify import handle_notify
 from module.ai_hook.hook import AISidecarClient
 
 
+# Mirrors limit_next_run() in module/config/config.py:310-315. ALAS clamps
+# Scheduler.NextRun on every config load and resets an OVER-ceiling value to
+# *now* rather than to the ceiling, which turns a long skip into an immediate
+# retry. Ceilings are therefore exclusive -- always clamp to ceiling - 1.
+# Keep this table in sync when merging upstream.
+_NEXT_RUN_CEILING_MINUTES = {
+    'Commission': 12 * 60,
+    'Reward': 12 * 60,
+    'Research': 24 * 60,
+    'OpsiExplore': 31 * 24 * 60,
+    'OpsiCrossMonth': 31 * 24 * 60,
+    'OpsiVoucher': 31 * 24 * 60,
+    'OpsiMonthBoss': 31 * 24 * 60,
+    'OpsiShop': 31 * 24 * 60,
+    'OpsiArchive': 7 * 24 * 60,
+}
+_DEFAULT_NEXT_RUN_CEILING_MINUTES = 24 * 60
+# Floor prevents an AI-proposed delay from busy-looping the scheduler.
+_MIN_SKIP_DELAY_MINUTES = 15
+
+
 class AzurLaneAutoScript:
     stop_event: threading.Event = None
 
@@ -31,6 +52,20 @@ class AzurLaneAutoScript:
         # it must NEVER touch stop_event, which is the GUI's shared updater
         # event (setting it poisons every future Start until GUI restart).
         self._ai_pause = False
+
+    def _clamp_skip_delay(self, task_name, minutes):
+        """Clamp a proposed skip delay below ALAS's per-task NextRun ceiling.
+
+        Returns None if `minutes` is not parseable as an integer, so callers
+        can fall back to ALAS's own FailureInterval.
+        """
+        try:
+            requested = int(minutes)
+        except (TypeError, ValueError):
+            return None
+        ceiling = _NEXT_RUN_CEILING_MINUTES.get(
+            task_name, _DEFAULT_NEXT_RUN_CEILING_MINUTES)
+        return max(_MIN_SKIP_DELAY_MINUTES, min(requested, ceiling - 1))
 
     def _apply_directive(self, directive, task=None):
         """Apply an AI sidecar directive to the scheduler."""

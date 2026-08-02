@@ -114,3 +114,44 @@ class TestUnknownStatePayload:
         assert payload['task'] == 'Commission'
         assert 'flashing bug' in payload['error']
         assert payload['count'] == 0
+
+
+class TestClampSkipDelay:
+    def test_commission_is_clamped_below_the_12h_ceiling(self):
+        """Commission caps at 12h; ALAS resets an over-cap NextRun to now."""
+        instance = make_instance()
+        assert instance._clamp_skip_delay('Commission', 1440) == 719
+
+    def test_reward_is_clamped_below_the_12h_ceiling(self):
+        instance = make_instance()
+        assert instance._clamp_skip_delay('Reward', 5000) == 719
+
+    def test_unlisted_task_is_clamped_below_the_24h_ceiling(self):
+        instance = make_instance()
+        assert instance._clamp_skip_delay('Dorm', 1440) == 1439
+
+    def test_research_uses_the_24h_ceiling(self):
+        instance = make_instance()
+        assert instance._clamp_skip_delay('Research', 99999) == 1439
+
+    def test_opsi_archive_uses_the_7d_ceiling(self):
+        instance = make_instance()
+        assert instance._clamp_skip_delay('OpsiArchive', 99999) == 7 * 24 * 60 - 1
+
+    def test_value_under_the_ceiling_is_untouched(self):
+        instance = make_instance()
+        assert instance._clamp_skip_delay('Commission', 90) == 90
+
+    def test_value_below_the_floor_is_raised(self):
+        """A tiny delay would busy-loop the scheduler."""
+        instance = make_instance()
+        assert instance._clamp_skip_delay('Commission', 1) == 15
+
+    def test_numeric_string_is_accepted(self):
+        instance = make_instance()
+        assert instance._clamp_skip_delay('Commission', '90') == 90
+
+    def test_unparseable_value_returns_none(self):
+        instance = make_instance()
+        assert instance._clamp_skip_delay('Commission', 'soon') is None
+        assert instance._clamp_skip_delay('Commission', None) is None
