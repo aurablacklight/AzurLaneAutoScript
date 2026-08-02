@@ -88,8 +88,24 @@ class AzurLaneAutoScript:
             task_name = directive.get('task')
             if task_name:
                 try:
-                    self.config.task_delay(minute=1440, task=task_name)
-                    logger.info(f'AI sidecar: skipping task `{task_name}` for 24h')
+                    minutes = self._clamp_skip_delay(
+                        task_name, directive.get('delay_minutes'))
+                    if minutes is None:
+                        # No usable proposal -- defer to ALAS's own
+                        # Scheduler.FailureInterval for this task.
+                        self.config.task_delay(success=False, task=task_name)
+                        logger.info(
+                            f'AI sidecar: skipping task `{task_name}` '
+                            f'(no delay proposed, using FailureInterval)')
+                    else:
+                        # success=False supplies FailureInterval as a second
+                        # candidate; task_delay takes min(), so the AI can only
+                        # pull the retry sooner, never defer it further.
+                        self.config.task_delay(
+                            minute=minutes, success=False, task=task_name)
+                        logger.info(
+                            f'AI sidecar: skipping task `{task_name}` '
+                            f'for {minutes}m')
                 except Exception as e:
                     logger.warning(f'Failed to skip task {task_name}: {e}')
         elif action == 'pause':
