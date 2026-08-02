@@ -7,6 +7,7 @@ Tests for alas.py AI-sidecar directive handling:
 import sys
 import os
 import threading
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -230,3 +231,47 @@ class TestClampSkipDelay:
         instance = make_instance()
         assert instance._clamp_skip_delay('Commission', 'soon') is None
         assert instance._clamp_skip_delay('Commission', None) is None
+
+
+class TestNextRunGuard:
+    def test_skip_does_not_overwrite_a_further_out_next_run(self):
+        """A task that already scheduled itself further out keeps its value."""
+        instance = make_instance()
+        instance.__dict__['config'] = MagicMock()
+        instance.config.data = {
+            'Commission': {
+                'Scheduler': {
+                    'NextRun': datetime.now() + timedelta(minutes=600)
+                }
+            }
+        }
+        instance._apply_directive(
+            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 60},
+            task='Commission')
+        instance.config.task_delay.assert_not_called()
+
+    def test_skip_applies_when_stored_next_run_is_sooner(self):
+        instance = make_instance()
+        instance.__dict__['config'] = MagicMock()
+        instance.config.data = {
+            'Commission': {
+                'Scheduler': {
+                    'NextRun': datetime.now() + timedelta(minutes=5)
+                }
+            }
+        }
+        instance._apply_directive(
+            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 60},
+            task='Commission')
+        instance.config.task_delay.assert_called_once_with(
+            minute=60, success=False, task='Commission')
+
+    def test_skip_applies_when_no_next_run_is_stored(self):
+        instance = make_instance()
+        instance.__dict__['config'] = MagicMock()
+        instance.config.data = {}
+        instance._apply_directive(
+            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 60},
+            task='Commission')
+        instance.config.task_delay.assert_called_once_with(
+            minute=60, success=False, task='Commission')

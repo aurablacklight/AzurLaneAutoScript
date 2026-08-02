@@ -67,6 +67,22 @@ class AzurLaneAutoScript:
             task_name, _DEFAULT_NEXT_RUN_CEILING_MINUTES)
         return max(_MIN_SKIP_DELAY_MINUTES, min(requested, ceiling - 1))
 
+    def _stored_next_run_is_further_out(self, task_name, minutes):
+        """True if the stored NextRun is already later than our proposal.
+
+        task_delay() overwrites unconditionally, so without this guard a skip
+        destroys a precise NextRun the task computed from screen. Mirrors the
+        guard in opsi_task_delay (module/config/config.py:470-473).
+        """
+        stored = deep_get(
+            self.config.data,
+            keys=f'{task_name}.Scheduler.NextRun',
+            default=None)
+        if not isinstance(stored, datetime):
+            return False
+        proposed = datetime.now().replace(microsecond=0) + timedelta(minutes=minutes)
+        return stored >= proposed
+
     def _apply_directive(self, directive, task=None):
         """Apply an AI sidecar directive to the scheduler."""
         if directive is None:
@@ -106,6 +122,11 @@ class AzurLaneAutoScript:
                             f'AI sidecar: skipping task `{task_name}` '
                             f'(no delay proposed, using FailureInterval)')
                     else:
+                        if self._stored_next_run_is_further_out(task_name, minutes):
+                            logger.info(
+                                f'AI sidecar: skip for `{task_name}` ignored; '
+                                f'stored NextRun is already further out than {minutes}m')
+                            return
                         # success=False supplies FailureInterval as a second
                         # candidate; task_delay takes min(), so the AI can only
                         # pull the retry sooner, never defer it further.
