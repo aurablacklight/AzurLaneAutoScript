@@ -85,7 +85,15 @@ class AzurLaneAutoScript:
             except Exception as e:
                 logger.warning(f'Failed to apply reprioritize: {e}')
         elif action == 'skip':
-            task_name = directive.get('task')
+            # Prefer the bound task over the directive's claimed target:
+            # success= below resolves Scheduler.FailureInterval from whatever
+            # task is currently bound (module/config/config.py bind()),
+            # independent of the task= kwarg passed to task_delay(), which
+            # only controls where NextRun is written. Using a different task
+            # here would silently apply one task's failure-backoff policy to
+            # another task's schedule. Fall back to the directive's claim
+            # only when no task is bound.
+            task_name = task if task is not None else directive.get('task')
             if task_name:
                 try:
                     minutes = self._clamp_skip_delay(

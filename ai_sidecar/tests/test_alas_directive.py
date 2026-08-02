@@ -112,17 +112,31 @@ class TestSkipDelayHandling:
         instance._apply_directive({'action': 'skip'}, task=None)
         instance.config.task_delay.assert_not_called()
 
-    def test_skip_target_equals_the_bound_task(self):
+    def test_skip_uses_the_bound_task_not_the_directive_claim(self):
         """success= resolves FailureInterval from the BOUND task while writing
         to {task}.Scheduler.NextRun. Those must be the same task, or one task's
-        interval lands in another's slot."""
+        interval lands in another's slot -- so the bound task must win even
+        when the directive claims a different target."""
         instance = make_instance()
         instance.__dict__['config'] = MagicMock()
         instance.config.data = {}
         instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission'}, task='Commission')
+            {'action': 'skip', 'task': 'Dorm', 'delay_minutes': 60},
+            task='Commission')
         kwargs = instance.config.task_delay.call_args[1]
         assert kwargs['task'] == 'Commission'
+
+    def test_skip_falls_back_to_directive_task_when_unbound(self):
+        """With no bound task, the directive's claimed target is the only
+        signal available, so it is used as-is."""
+        instance = make_instance()
+        instance.__dict__['config'] = MagicMock()
+        instance.config.data = {}
+        instance._apply_directive(
+            {'action': 'skip', 'task': 'Dorm', 'delay_minutes': 60},
+            task=None)
+        kwargs = instance.config.task_delay.call_args[1]
+        assert kwargs['task'] == 'Dorm'
 
 
 class TestPauseStopsLoop:
