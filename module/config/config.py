@@ -295,18 +295,28 @@ class AzurLaneConfig(ConfigUpdater, ManualConfig, GeneratedConfig, ConfigWatcher
                 if isinstance(next_run, datetime) and next_run > limit:
                     deep_set(self.data, keys=f"{task}.Scheduler.NextRun", value=now)
 
-        for task in ["Commission", "Research", "Reward"]:
+        # FORK CHANGE 2026-08-02: "Research" removed from this list.
+        #
+        # A task the account cannot complete (Research requires account level 30)
+        # can never succeed, so failure_record only ever ratchets upward and
+        # alas.py:776-780 exits via RequestHumanTakeover at 3 strikes. No AI
+        # sidecar directive can prevent that -- a skip only spaces the ratchet,
+        # because the strike increment is unconditional and runs after the
+        # directive is applied. Scheduler.Enable = False is the only mechanism
+        # that stops a task being attempted at all (honored at config.py:214,
+        # which excludes disabled tasks from both pending and waiting).
+        # Upstream force-enables these three, presumably as accidental-disable
+        # protection; that protection is wrong for an account-gated task.
+        #
+        # Re-add "Research" here once the account reaches level 30.
+        #
+        # NOTE: the `force_enable = list` block that used to sit below was dead
+        # code -- it rebound the name to the built-in `list`, so the call merely
+        # constructed a list and discarded it. Removed to prevent someone
+        # "repairing" it later and silently re-enabling Research.
+        for task in ["Commission", "Reward"]:
             if not self.is_task_enabled(task):
                 self.modified[f"{task}.Scheduler.Enable"] = True
-        force_enable = list
-
-        force_enable(
-            [
-                "Commission",
-                "Research",
-                "Reward",
-            ]
-        )
         limit_next_run(["Commission", "Reward"], limit=now + timedelta(hours=12, seconds=-1))
         limit_next_run(["Research"], limit=now + timedelta(hours=24, seconds=-1))
         limit_next_run(["OpsiExplore", "OpsiCrossMonth", "OpsiVoucher", "OpsiMonthBoss", "OpsiShop"],
