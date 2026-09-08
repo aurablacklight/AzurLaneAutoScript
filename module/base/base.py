@@ -72,6 +72,13 @@ class ModuleBase:
         """
         if ModuleBase.EARLY_OCR_IMPORT:
             return
+        from module.webui.setting import State
+        if State.deploy_config.UseOcrServer:
+            # OCR is served by the sidecar over HTTP; cnocr and mxnet are not
+            # installed in this environment, so pre-importing them only raises
+            # in a daemon thread.
+            logger.info('UseOcrServer is set, skip early_ocr_import')
+            return
         if not self.config.is_actual_task:
             logger.info('No actual task bound, skip early_ocr_import')
             return
