@@ -224,6 +224,13 @@ class AzurLaneConfig(ConfigUpdater, ManualConfig, GeneratedConfig, ConfigWatcher
         f.load(self.SCHEDULER_PRIORITY)
         if pending:
             pending = f.apply(pending)
+            # Sidecar priority is transient and applies only to eligible tasks.
+            # NextRun remains the eligibility deadline, never an ordering key.
+            order = getattr(self, '_sidecar_task_order', ())
+            rank = {name: i for i, name in enumerate(order)}
+            pending.sort(key=lambda task: (
+                -1 if task.command == 'Restart' else rank.get(task.command, len(rank))
+            ))
         if waiting:
             waiting = f.apply(waiting)
             waiting = sorted(waiting, key=operator.attrgetter("next_run"))
@@ -295,25 +302,9 @@ class AzurLaneConfig(ConfigUpdater, ManualConfig, GeneratedConfig, ConfigWatcher
                 if isinstance(next_run, datetime) and next_run > limit:
                     deep_set(self.data, keys=f"{task}.Scheduler.NextRun", value=now)
 
-        # FORK CHANGE 2026-08-02: "Research" removed from this list.
-        #
-        # A task the account cannot complete (Research requires account level 30)
-        # can never succeed, so failure_record only ever ratchets upward and
-        # alas.py:776-780 exits via RequestHumanTakeover at 3 strikes. No AI
-        # sidecar directive can prevent that -- a skip only spaces the ratchet,
-        # because the strike increment is unconditional and runs after the
-        # directive is applied. Scheduler.Enable = False is the only mechanism
-        # that stops a task being attempted at all (honored at config.py:214,
-        # which excludes disabled tasks from both pending and waiting).
-        # Upstream force-enables these three, presumably as accidental-disable
-        # protection; that protection is wrong for an account-gated task.
-        #
-        # Re-add "Research" here once the account reaches level 30.
-        #
-        # NOTE: the `force_enable = list` block that used to sit below was dead
-        # code -- it rebound the name to the built-in `list`, so the call merely
-        # constructed a list and discarded it. Removed to prevent someone
-        # "repairing" it later and silently re-enabling Research.
+        # Research must remain user-disableable for accounts below level 30.
+        # Its editable Enable schema is inherited from argument.yaml; only
+        # Commission and Reward retain upstream forced-enable protection.
         for task in ["Commission", "Reward"]:
             if not self.is_task_enabled(task):
                 self.modified[f"{task}.Scheduler.Enable"] = True

@@ -7,7 +7,6 @@ Tests for alas.py AI-sidecar directive handling:
 import sys
 import os
 import threading
-from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -53,92 +52,6 @@ class TestPauseGuard:
         instance._apply_directive({'action': 'pause', 'reason': 'user asked'})
         assert not instance.stop_event.is_set()
         assert instance._ai_pause is True
-
-    def test_skip_directive_still_works_with_new_signature(self):
-        """skip directive keeps working when a task kwarg is passed."""
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission'}, task='Commission')
-        instance.config.task_delay.assert_called_once_with(
-            success=False, task='Commission')
-        assert not instance.stop_event.is_set()
-
-
-class TestSkipDelayHandling:
-    def test_proposed_delay_is_clamped_and_passed_with_success_false(self):
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 1440},
-            task='Commission')
-        instance.config.task_delay.assert_called_once_with(
-            minute=719, success=False, task='Commission')
-
-    def test_reasonable_delay_passes_through(self):
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 180},
-            task='Commission')
-        instance.config.task_delay.assert_called_once_with(
-            minute=180, success=False, task='Commission')
-
-    def test_absent_delay_falls_back_to_failure_interval(self):
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission'}, task='Commission')
-        instance.config.task_delay.assert_called_once_with(
-            success=False, task='Commission')
-
-    def test_unparseable_delay_falls_back_to_failure_interval(self):
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 'tomorrow'},
-            task='Commission')
-        instance.config.task_delay.assert_called_once_with(
-            success=False, task='Commission')
-
-    def test_skip_without_task_name_does_nothing(self):
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive({'action': 'skip'}, task=None)
-        instance.config.task_delay.assert_not_called()
-
-    def test_skip_uses_the_bound_task_not_the_directive_claim(self):
-        """success= resolves FailureInterval from the BOUND task while writing
-        to {task}.Scheduler.NextRun. Those must be the same task, or one task's
-        interval lands in another's slot -- so the bound task must win even
-        when the directive claims a different target."""
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Dorm', 'delay_minutes': 60},
-            task='Commission')
-        kwargs = instance.config.task_delay.call_args[1]
-        assert kwargs['task'] == 'Commission'
-
-    def test_skip_falls_back_to_directive_task_when_unbound(self):
-        """With no bound task, the directive's claimed target is the only
-        signal available, so it is used as-is."""
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Dorm', 'delay_minutes': 60},
-            task=None)
-        kwargs = instance.config.task_delay.call_args[1]
-        assert kwargs['task'] == 'Dorm'
-
 
 class TestPauseStopsLoop:
     def test_loop_exits_immediately_when_ai_pause_set(self):
@@ -231,47 +144,3 @@ class TestClampSkipDelay:
         instance = make_instance()
         assert instance._clamp_skip_delay('Commission', 'soon') is None
         assert instance._clamp_skip_delay('Commission', None) is None
-
-
-class TestNextRunGuard:
-    def test_skip_does_not_overwrite_a_further_out_next_run(self):
-        """A task that already scheduled itself further out keeps its value."""
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {
-            'Commission': {
-                'Scheduler': {
-                    'NextRun': datetime.now() + timedelta(minutes=600)
-                }
-            }
-        }
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 60},
-            task='Commission')
-        instance.config.task_delay.assert_not_called()
-
-    def test_skip_applies_when_stored_next_run_is_sooner(self):
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {
-            'Commission': {
-                'Scheduler': {
-                    'NextRun': datetime.now() + timedelta(minutes=5)
-                }
-            }
-        }
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 60},
-            task='Commission')
-        instance.config.task_delay.assert_called_once_with(
-            minute=60, success=False, task='Commission')
-
-    def test_skip_applies_when_no_next_run_is_stored(self):
-        instance = make_instance()
-        instance.__dict__['config'] = MagicMock()
-        instance.config.data = {}
-        instance._apply_directive(
-            {'action': 'skip', 'task': 'Commission', 'delay_minutes': 60},
-            task='Commission')
-        instance.config.task_delay.assert_called_once_with(
-            minute=60, success=False, task='Commission')

@@ -286,7 +286,7 @@
     },
     "Enable": {
       "name": "Enable Task",
-      "help": "Join this task to scheduler.\nTask commission, research, reward are force to enable.",
+      "help": "Join this task to the scheduler.\nCommission and Reward are always enabled. Disable Research until Commander level 30.",
       "True": "Enabled",
       "False": "False"
     },

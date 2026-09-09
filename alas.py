@@ -10,6 +10,7 @@ from cached_property import cached_property
 from module.base.decorator import del_cached_property
 from module.config.config import AzurLaneConfig, TaskEnd
 from module.config.deep import deep_get, deep_set
+from module.config.utils import ensure_time
 from module.exception import *
 from module.logger import logger
 from module.notify import handle_notify
@@ -59,84 +60,65 @@ class AzurLaneAutoScript:
         Returns None if `minutes` is not parseable as an integer, so callers
         can fall back to ALAS's own FailureInterval.
         """
+        if isinstance(minutes, bool) or not isinstance(minutes, (int, str)):
+            return None
         try:
             requested = int(minutes)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
         ceiling = _NEXT_RUN_CEILING_MINUTES.get(
             task_name, _DEFAULT_NEXT_RUN_CEILING_MINUTES)
         return max(_MIN_SKIP_DELAY_MINUTES, min(requested, ceiling - 1))
 
-    def _stored_next_run_is_further_out(self, task_name, minutes):
-        """True if the stored NextRun is already later than our proposal.
-
-        task_delay() overwrites unconditionally, so without this guard a skip
-        destroys a precise NextRun the task computed from screen. Mirrors the
-        guard in opsi_task_delay (module/config/config.py:470-473).
-        """
-        stored = deep_get(
-            self.config.data,
-            keys=f'{task_name}.Scheduler.NextRun',
-            default=None)
-        if not isinstance(stored, datetime):
-            return False
-        proposed = datetime.now().replace(microsecond=0) + timedelta(minutes=minutes)
-        return stored >= proposed
-
     def _apply_directive(self, directive, task=None):
-        """Apply an AI sidecar directive to the scheduler."""
-        if directive is None:
+        """Apply a directive without changing task eligibility to express priority."""
+        if not isinstance(directive, dict):
             return
         action = directive.get('action')
         if action == 'reprioritize':
-            task_order = directive.get('task_order', [])
+            task_order = directive.get('task_order')
+            if not isinstance(task_order, list):
+                return
+            self.config.load()
+            self.config.get_next_task()
             now = datetime.now()
-            for i, task_name in enumerate(task_order):
-                target = now + timedelta(seconds=i + 1)
-                key = f'{task_name}.Scheduler.NextRun'
-                self.config.modified[key] = target
-                logger.info(f'AI sidecar: reprioritize `{task_name}` to {target}')
-            try:
-                self.config.update()
-            except Exception as e:
-                logger.warning(f'Failed to apply reprioritize: {e}')
+            ready = {item.command for item in self.config.pending_task
+                     if isinstance(item.next_run, datetime) and item.next_run < now}
+            order = []
+            for name in task_order:
+                if isinstance(name, str) and name in ready and name not in order:
+                    order.append(name)
+            self.config._sidecar_task_order = tuple(order)
+            logger.info(f'AI sidecar: ready task priority {order}; NextRun unchanged')
         elif action == 'skip':
-            # Prefer the bound task over the directive's claimed target:
-            # success= below resolves Scheduler.FailureInterval from whatever
-            # task is currently bound (module/config/config.py bind()),
-            # independent of the task= kwarg passed to task_delay(), which
-            # only controls where NextRun is written. Using a different task
-            # here would silently apply one task's failure-backoff policy to
-            # another task's schedule. Fall back to the directive's claim
-            # only when no task is bound.
+            # A bound task is authoritative. An unbound directive may only
+            # target a known, enabled task, using that task's own fallback.
             task_name = task if task is not None else directive.get('task')
-            if task_name:
-                try:
-                    minutes = self._clamp_skip_delay(
-                        task_name, directive.get('delay_minutes'))
-                    if minutes is None:
-                        # No usable proposal -- defer to ALAS's own
-                        # Scheduler.FailureInterval for this task.
-                        self.config.task_delay(success=False, task=task_name)
-                        logger.info(
-                            f'AI sidecar: skipping task `{task_name}` '
-                            f'(no delay proposed, using FailureInterval)')
-                    else:
-                        if self._stored_next_run_is_further_out(task_name, minutes):
-                            logger.info(
-                                f'AI sidecar: skip for `{task_name}` ignored; '
-                                f'stored NextRun is already further out than {minutes}m')
-                            return
-                        # success=False supplies FailureInterval as a second
-                        # candidate; task_delay takes min(), so the AI can only
-                        # pull the retry sooner, never defer it further.
-                        self.config.task_delay(
-                            minute=minutes, success=False, task=task_name)
-                        logger.info(
-                            f'AI sidecar: skipping task `{task_name}` '
-                            f'for {minutes}m')
-                except Exception as e:
-                    logger.warning(f'Failed to skip task {task_name}: {e}')
+            if not isinstance(task_name, str) or not task_name.strip():
+                return
+            try:
+                self.config.load()
+                if not self.config.is_task_enabled(task_name):
+                    logger.warning(f'AI sidecar: ignoring skip for disabled/unknown task `{task_name}`')
+                    return
+                minutes = self._clamp_skip_delay(task_name, directive.get('delay_minutes'))
+                if minutes is None:
+                    interval = self.config.cross_get(f'{task_name}.Scheduler.FailureInterval')
+                    minutes = self._clamp_skip_delay(task_name, int(ensure_time(interval, precision=3)))
+                if minutes is None:
+                    return
+                target = datetime.now().replace(microsecond=0) + timedelta(minutes=minutes)
+                stored = self.config.cross_get(f'{task_name}.Scheduler.NextRun')
+                if isinstance(stored, datetime) and stored >= target:
+                    logger.info(f'AI sidecar: preserving `{task_name}` NextRun {stored}')
+                    return
+                # Supply one deadline: adding success=False would select the
+                # earlier FailureInterval and silently shorten an explicit skip.
+                self.config.task_delay(target=target, task=task_name)
+                actual = self.config.cross_get(f'{task_name}.Scheduler.NextRun')
+                logger.info(f'AI sidecar: skipped `{task_name}`; NextRun {actual}')
+            except Exception as e:
+                logger.warning(f'Failed to skip task {task_name}: {e}')
         elif action == 'pause':
             reason = directive.get('reason', 'AI requested pause')
             if task is not None:
