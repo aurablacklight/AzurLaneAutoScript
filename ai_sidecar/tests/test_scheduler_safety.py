@@ -1,6 +1,7 @@
 """Regression tests against real ALAS configuration, isolated from live profiles."""
 import copy
 import json
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,8 +14,8 @@ import module.config.config_updater as updater_module
 from alas import AzurLaneAutoScript
 from module.config.config import AzurLaneConfig
 from module.config.config_updater import ConfigGenerator
-from module.config.deep import deep_get
-from module.exception import GameStuckError
+from module.config.deep import deep_get, deep_set
+from module.exception import GameStuckError, GameTooManyClickError
 
 ROOT = Path(__file__).resolve().parents[2]
 NOW = datetime(2026, 9, 8, 22, 0, 0)
@@ -188,8 +189,25 @@ def test_disabled_research_never_selected_while_ready_tasks_progress(profile):
     assert 'Research' not in [t.command for t in runner.config.pending_task + runner.config.waiting_task]
 
 
-@pytest.mark.parametrize('directive', [None, {'action': 'skip', 'task': 'Research', 'delay_minutes': 1440}])
-def test_real_stuck_handler_retains_native_restart_and_skip_deadline(profile, directive):
+@pytest.mark.parametrize('error', [GameStuckError, GameTooManyClickError])
+@pytest.mark.parametrize('next_minutes,delay,expected', [(-1, 1440, 1439), (120, 60, 120)])
+def test_real_stuck_handler_defers_confirmed_skip_without_restart(profile, error, next_minutes, delay, expected):
+    runner, _ = profile(next_minutes=next_minutes)
+    runner.__dict__['device'] = MagicMock()
+    runner._sidecar = MagicMock()
+    runner._sidecar.notify.return_value = {'action': 'skip', 'delay_minutes': delay}
+    runner.save_error_log = lambda: None
+    runner.research = MagicMock(side_effect=error('locked research'))
+    runner.config.task_call = MagicMock()
+    assert runner.run('research', skip_first_screenshot=True) is False
+    runner.config.task_call.assert_not_called()
+    runner.device.sleep.assert_not_called()
+    assert runner._task_deferred
+    assert deep_get(AzurLaneConfig('regression').data, 'Research.Scheduler.NextRun') == NOW + timedelta(minutes=expected)
+
+
+@pytest.mark.parametrize('directive', [None, {}, [], {'action': 'continue'}])
+def test_real_stuck_handler_retains_native_restart_without_skip(profile, directive):
     runner, _ = profile()
     runner.__dict__['device'] = MagicMock()
     runner._sidecar = MagicMock()
@@ -199,8 +217,82 @@ def test_real_stuck_handler_retains_native_restart_and_skip_deadline(profile, di
     assert runner.run('research', skip_first_screenshot=True) is False
     assert runner.config.is_task_enabled('Restart')
     runner.device.sleep.assert_called_once_with(10)
-    if directive:
-        assert deep_get(runner.config.data, 'Research.Scheduler.NextRun') == NOW + timedelta(minutes=1439)
+
+
+@pytest.mark.parametrize('failure', ['disabled', 'write_raises', 'write_noop', 'pending_only', 'read_raises'])
+def test_unconfirmed_skip_preserves_native_recovery(profile, failure):
+    runner, path = profile(enabled=failure != 'disabled')
+    runner.__dict__['device'] = MagicMock()
+    runner._sidecar = MagicMock()
+    runner._sidecar.notify.return_value = {'action': 'skip', 'delay_minutes': 90}
+    runner.save_error_log = lambda: None
+    runner.research = MagicMock(side_effect=GameTooManyClickError('locked research'))
+    config = runner.config
+    config.task_call = MagicMock()
+    if failure == 'write_raises':
+        config.write_file = MagicMock(side_effect=OSError('write failed'))
+    elif failure == 'write_noop':
+        config.write_file = MagicMock()
+    elif failure == 'pending_only':
+        def pending_delay(target, task):
+            config.modified[f'{task}.Scheduler.NextRun'] = target
+            deep_set(config.data, f'{task}.Scheduler.NextRun', target)
+        config.task_delay = pending_delay
+    elif failure == 'read_raises':
+        read_file = config.read_file
+        config.read_file = MagicMock(side_effect=[read_file('regression'), read_file('regression'), OSError('read failed')])
+    assert runner.run('research', skip_first_screenshot=True) is False
+    assert not runner._task_deferred
+    config.task_call.assert_called_once_with('Restart')
+    runner.device.sleep.assert_called_once_with(10)
+
+
+def test_deferred_flag_does_not_suppress_next_run_recovery(profile):
+    runner, _ = profile()
+    runner.__dict__['device'] = MagicMock()
+    runner._sidecar = MagicMock()
+    runner._sidecar.notify.side_effect = [{'action': 'skip', 'delay_minutes': 90}, None]
+    runner.save_error_log = lambda: None
+    runner.research = MagicMock(side_effect=GameTooManyClickError('locked research'))
+    runner.config.task_call = MagicMock()
+    assert runner.run('research') is False
+    assert runner._task_deferred
+    assert runner.run('research') is False
+    assert not runner._task_deferred
+    runner.config.task_call.assert_called_once_with('Restart')
+    runner.device.sleep.assert_called_once_with(10)
+
+
+def test_scheduler_proceeds_after_deferred_task_without_result_or_failure(profile, monkeypatch):
+    runner, _ = profile(extra={'Dorm': {'Enable': True, 'NextRun': str(NOW - timedelta(minutes=1))}})
+    runner.config.override(AiSidecar_Enabled=True, Error_HandleError=False)
+    runner.__dict__['device'] = MagicMock()
+    checker = MagicMock()
+    checker.is_recovered.return_value = False
+    runner.__dict__['checker'] = checker
+    runner.stop_event = threading.Event()
+    runner.failure_record['Research'] = 2
+    runner.save_error_log = lambda: None
+    runner.research = MagicMock(side_effect=GameTooManyClickError('locked research'))
+    runner.dorm = MagicMock(side_effect=runner.stop_event.set)
+    tasks = iter(['Research', 'Dorm'])
+    def next_task():
+        task = next(tasks)
+        runner.config.init_task(task)
+        return task
+    runner.get_next_task = next_task
+    client = MagicMock()
+    client.notify.side_effect = lambda event, payload: {'action': 'skip', 'delay_minutes': 90} if event == 'unknown_state' else None
+    monkeypatch.setattr(alas, 'AISidecarClient', lambda _: client)
+    monkeypatch.setattr(alas.logger, 'set_file_logger', lambda _: None)
+    runner.loop()
+    runner.dorm.assert_called_once()
+    assert runner.failure_record['Research'] == 2
+    results = [(call.args[0], call.args[1]['task']) for call in client.notify.call_args_list
+               if call.args[0] in ('task_complete', 'task_failed')]
+    assert results == [('task_complete', 'Dorm')]
+    assert not runner._task_deferred
+    assert deep_get(AzurLaneConfig('regression').data, 'Research.Scheduler.NextRun') == NOW + timedelta(minutes=90)
 
 
 def test_native_three_failure_stop_with_unavailable_sidecar(monkeypatch):

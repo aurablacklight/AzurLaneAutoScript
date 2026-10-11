@@ -53,6 +53,7 @@ class AzurLaneAutoScript:
         # it must NEVER touch stop_event, which is the GUI's shared updater
         # event (setting it poisons every future Start until GUI restart).
         self._ai_pause = False
+        self._task_deferred = False
 
     def _clamp_skip_delay(self, task_name, minutes):
         """Clamp a proposed skip delay below ALAS's per-task NextRun ceiling.
@@ -71,7 +72,7 @@ class AzurLaneAutoScript:
         return max(_MIN_SKIP_DELAY_MINUTES, min(requested, ceiling - 1))
 
     def _apply_directive(self, directive, task=None):
-        """Apply a directive without changing task eligibility to express priority."""
+        """Apply a directive; return True only for a confirmed skip deadline."""
         if not isinstance(directive, dict):
             return
         action = directive.get('action')
@@ -110,13 +111,23 @@ class AzurLaneAutoScript:
                 target = datetime.now().replace(microsecond=0) + timedelta(minutes=minutes)
                 stored = self.config.cross_get(f'{task_name}.Scheduler.NextRun')
                 if isinstance(stored, datetime) and stored >= target:
-                    logger.info(f'AI sidecar: preserving `{task_name}` NextRun {stored}')
-                    return
+                    persisted = deep_get(self.config.read_file(self.config_name),
+                                         f'{task_name}.Scheduler.NextRun')
+                    if isinstance(persisted, datetime) and persisted >= target:
+                        logger.info(f'AI sidecar: preserving `{task_name}` NextRun {persisted}')
+                        return True
                 # Supply one deadline: adding success=False would select the
                 # earlier FailureInterval and silently shorten an explicit skip.
                 self.config.task_delay(target=target, task=task_name)
-                actual = self.config.cross_get(f'{task_name}.Scheduler.NextRun')
+                # Verify persistence, rather than trusting a successful return
+                # or an in-memory mutation from task_delay().
+                actual = deep_get(self.config.read_file(self.config_name),
+                                  f'{task_name}.Scheduler.NextRun')
+                if not isinstance(actual, datetime) or actual < target:
+                    logger.warning(f'AI sidecar: skip deadline not saved for `{task_name}`')
+                    return
                 logger.info(f'AI sidecar: skipped `{task_name}`; NextRun {actual}')
+                return True
             except Exception as e:
                 logger.warning(f'Failed to skip task {task_name}: {e}')
         elif action == 'pause':
@@ -168,6 +179,9 @@ class AzurLaneAutoScript:
             exit(1)
 
     def run(self, command, skip_first_screenshot=False):
+        # Keep the bool result API; the scheduler distinguishes a confirmed
+        # deferral from both a completed task and an unhandled failure.
+        self._task_deferred = False
         try:
             if not skip_first_screenshot:
                 self.device.screenshot()
@@ -193,7 +207,9 @@ class AzurLaneAutoScript:
                         "error": str(e),
                         "count": deep_get(self.failure_record, keys=task_name, default=0),
                     })
-                    self._apply_directive(directive, task=task_name)
+                    if self._apply_directive(directive, task=task_name) is True:
+                        self._task_deferred = True
+                        return False
                 except Exception:
                     pass  # sidecar errors must never break ALAS
             logger.warning(f'Game stuck, {self.device.package} will be restarted in 10 seconds')
@@ -734,6 +750,11 @@ class AzurLaneAutoScript:
             _task_duration = time.time() - _task_start
             logger.info(f'Scheduler: End task `{task}`')
             self.is_first_task = False
+
+            if self._task_deferred:
+                logger.info(f'Scheduler: Deferred task `{task}`')
+                del_cached_property(self, 'config')
+                continue
 
             # AI sidecar: task result
             if self._sidecar:
