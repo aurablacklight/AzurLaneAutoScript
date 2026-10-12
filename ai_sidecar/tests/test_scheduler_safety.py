@@ -318,3 +318,103 @@ def test_native_three_failure_stop_with_unavailable_sidecar(monkeypatch):
     assert runner.run.call_count == 3
     assert runner.failure_record['Research'] == 3
     assert not runner._ai_pause
+
+
+def _task_failed_runner(monkeypatch, run_results, notify, device=None, handle_error=True):
+    """Loop-level runner on a fake config: no profile, no device, no network."""
+    runner = AzurLaneAutoScript('fake_task_failed')
+    config = MagicMock()
+    config.AiSidecar_Enabled = True
+    config.Error_HandleError = handle_error
+    monkeypatch.setattr(AzurLaneAutoScript, 'config', property(lambda self: config))
+    runner.__dict__['device'] = device if device is not None else MagicMock()
+    checker = MagicMock()
+    checker.is_recovered.return_value = False
+    runner.__dict__['checker'] = checker
+    runner.stop_event = threading.Event()
+    runner.get_next_task = MagicMock(return_value='Research')
+    results = iter(run_results)
+
+    def run(command, skip_first_screenshot=False):
+        result = next(results)
+        if result == 'stop':
+            runner.stop_event.set()
+            return True
+        return result
+    runner.run = MagicMock(side_effect=run)
+    client = MagicMock()
+    client.notify.side_effect = notify
+    monkeypatch.setattr(alas, 'AISidecarClient', lambda _: client)
+    monkeypatch.setattr(alas.logger, 'set_file_logger', lambda _: None)
+    return runner, client
+
+
+def _task_failed_calls(client):
+    return [call.args[1] for call in client.notify.call_args_list if call.args[0] == 'task_failed']
+
+
+def test_task_failed_carries_last_stored_screenshot_without_new_capture(monkeypatch):
+    device = MagicMock()
+    device.image = 'last-frame'
+    runner, client = _task_failed_runner(monkeypatch, [False], lambda event, payload: None,
+                                         device=device, handle_error=False)
+    client.screenshot_to_base64.side_effect = lambda image: 'b64:' + image
+    runner.loop()
+    sent = _task_failed_calls(client)
+    assert len(sent) == 1
+    assert sent[0]['screenshot'] == 'b64:last-frame'
+    assert sent[0]['task'] == 'Research'
+    assert sent[0]['error'] == 'task_returned_failure'
+    assert sent[0]['count'] == 0
+    # The only fresh capture in the loop is the existing cycle_start one; task_failed
+    # reads the stored frame, because device.screenshot() runs stuck detection.
+    assert device.screenshot.call_count == 1
+    # cycle_start encodes its own fresh frame, task_failed re-encodes the stored one.
+    assert client.screenshot_to_base64.call_count == 2
+    client.screenshot_to_base64.assert_called_with('last-frame')
+
+
+@pytest.mark.parametrize('failure', ['encode_raises', 'encode_none', 'no_image'])
+def test_task_failed_still_posts_without_screenshot(monkeypatch, failure):
+    device = MagicMock()
+    device.image = None if failure == 'no_image' else 'last-frame'
+    runner, client = _task_failed_runner(monkeypatch, [False], lambda event, payload: None,
+                                         device=device, handle_error=False)
+    if failure == 'encode_raises':
+        client.screenshot_to_base64.side_effect = RuntimeError('encode failed')
+    else:
+        client.screenshot_to_base64.return_value = None
+    runner.loop()
+    sent = _task_failed_calls(client)
+    assert len(sent) == 1
+    assert 'screenshot' not in sent[0]
+    assert sent[0]['task'] == 'Research'
+    assert sent[0]['error'] == 'task_returned_failure'
+
+
+def test_task_failed_does_not_build_a_device_to_find_a_frame(monkeypatch):
+    runner = AzurLaneAutoScript('fake_no_device')
+    built = []
+    monkeypatch.setattr(AzurLaneAutoScript, 'device', property(lambda self: built.append(1)))
+    runner._sidecar = MagicMock()
+    assert 'device' not in runner.__dict__
+    assert runner._last_screenshot_base64() is None
+    assert not built
+    runner._sidecar.screenshot_to_base64.assert_not_called()
+
+
+def test_task_failed_hook_error_does_not_stop_scheduler(monkeypatch):
+    device = MagicMock()
+    device.image = 'last-frame'
+
+    def notify(event, payload):
+        if event == 'task_failed':
+            raise RuntimeError('sidecar exploded')
+        return None
+    runner, client = _task_failed_runner(monkeypatch, [False, 'stop'], notify, device=device)
+    client.screenshot_to_base64.return_value = 'b64'
+    runner.loop()
+    assert runner.run.call_count == 2
+    assert len(_task_failed_calls(client)) == 1
+    # Failure accounting still ran after the hook raised, and the next task succeeded.
+    assert runner.failure_record['Research'] == 0

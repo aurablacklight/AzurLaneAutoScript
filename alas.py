@@ -267,6 +267,31 @@ class AzurLaneAutoScript:
             )
             exit(1)
 
+    def _last_screenshot_base64(self):
+        """
+        The device's last stored frame, encoded the same way as `unknown_state`.
+
+        Deliberately does NOT call `device.screenshot()`: that runs
+        `stuck_record_check()` (may raise GameStuckError / GameNotRunningError
+        and clears the stuck record), may click through the night-commission
+        popup, and can block on a dead or restarting emulator. `task_failed`
+        fires after the task has already failed, so the frame the task last
+        saw is the evidence, and reading it has no side effects.
+
+        Returns:
+            str | None: None whenever no frame is available; never raises.
+        """
+        try:
+            # `device` is a cached_property: look in __dict__ so that this
+            # never builds (and connects) a Device just to find no frame.
+            device = self.__dict__.get('device')
+            image = getattr(device, 'image', None)
+            if image is None:
+                return None
+            return self._sidecar.screenshot_to_base64(image)
+        except Exception:
+            return None
+
     def save_error_log(self):
         """
         Save last 60 screenshots in ./log/error/<timestamp>
@@ -766,11 +791,15 @@ class AzurLaneAutoScript:
                             "duration": _task_duration,
                         })
                     else:
-                        directive = self._sidecar.notify("task_failed", {
+                        payload = {
                             "task": task,
                             "error": "task_returned_failure",
                             "count": deep_get(self.failure_record, keys=task, default=0),
-                        })
+                        }
+                        screenshot = self._last_screenshot_base64()
+                        if screenshot:
+                            payload["screenshot"] = screenshot
+                        directive = self._sidecar.notify("task_failed", payload)
                         self._apply_directive(directive, task=task)
                 except Exception:
                     pass
