@@ -1,66 +1,102 @@
 # Multi-Architecture Docker Compatibility
 
-## Three-Container Architecture
+## Containers
 
-The Docker deployment uses three containers:
+`docker-compose.yml` starts two containers:
 
-| Container | Service name | Port  | Purpose |
-|-----------|-------------|-------|---------|
-| ALAS      | `alas`      | 22267 | Main application and web UI |
-| OCR Server| `ocr`       | 22268 | Optical character recognition via cnocr/mxnet |
-| AI Sidecar| `sidecar`   | 8484  | AI-powered gameplay assistance |
+| Container  | Service name | Port  | Purpose |
+|------------|--------------|-------|---------|
+| ALAS       | `alas`       | 22267 | Main application and web UI |
+| AI Sidecar | `sidecar`    | 8484  | Python sidecar built from `./ai_sidecar` (`GET /health`, `POST /api/events`) |
 
-## Why OCR is a Separate Container
+A third service, `ocr` (cnocr/mxnet over zerorpc on port 22268), is commented out and kept
+for reference only. See [Legacy cnocr server](#legacy-cnocr-server).
 
-The OCR engine depends on `mxnet 1.6.0`, which only has x86 (amd64) builds. On Apple
-Silicon (arm64) Macs, mxnet crashes under Python when loaded in-process. Splitting OCR
-into its own container lets us:
+## OCR
 
-- Run the OCR server under x86 emulation (Rosetta 2 / QEMU) in an isolated container.
-- Run the main ALAS container natively on arm64 for full performance.
-- Keep everything working identically on amd64 (x86) hosts where all containers run
-  natively.
+With the default settings ALAS does not run OCR itself. `module/ocr/rpc.py` sends every OCR
+call over HTTP to the Rust sidecar `gacha-server` from
+[rust-gacha-ocr-sidecar](https://github.com/aurablacklight/rust-gacha-ocr-sidecar), which
+listens on port 8484 by default:
+
+```
+ALAS  --HTTP/JSON-->  gacha-server
+                       GET  /health          checked once when the client connects
+                       POST /ocr/recognize   one image, or a batch of up to 16
+```
+
+`gacha-server` also answers `GET /health` and `POST /api/events`, the two endpoints of the
+Python sidecar, so one process serves both the AI hook and OCR.
+
+The connection is configured in `config/deploy.yaml`:
+
+- `UseOcrServer: true` -- send OCR to the HTTP server. With `false`, every ALAS instance
+  loads cnocr and mxnet in-process, which only works where both are installed (x86 only).
+- `OcrClientAddress` -- `host:port` of `gacha-server`, without `http://`.
+  - ALAS and `gacha-server` on the same host: `127.0.0.1:8484`
+  - ALAS in Docker Compose: `host.docker.internal:8484`. The `alas` service maps that name
+    to the host with `extra_hosts`.
+  - ALAS in a container started with `--net=host` (`deploy/docker/Docker-run.sh`):
+    `127.0.0.1:8484`
+- `StartOcrServer: false` -- this only controls the legacy zerorpc server and is ignored
+  while `UseOcrServer` is `true`.
+
+Every shipped template sets `UseOcrServer: true`. `config/deploy.template-docker*.yaml` set
+`OcrClientAddress: host.docker.internal:8484`, the others `127.0.0.1:8484`. An existing
+`config/deploy.yaml` keeps the values it already has; change them by hand to move an install
+from the legacy path to the sidecar.
+
+There is no local fallback. If the server is unreachable or answers with a 5xx, the request
+is tried 3 times and then raises; a 4xx raises immediately.
+
+### Known gap in Docker Compose
+
+The `sidecar` service is still the Python sidecar. It has no `/ocr/recognize`, so with the
+compose file as shipped every OCR call fails with HTTP 404. It also publishes host port
+8484, the port `gacha-server` uses.
+
+Until the compose file runs `gacha-server` (a container image is tracked in
+[rust-gacha-ocr-sidecar#50](https://github.com/aurablacklight/rust-gacha-ocr-sidecar/issues/50)),
+run `gacha-server` on the host in place of the `sidecar` service, so that it is what listens
+on host port 8484. Two things to check:
+
+- `gacha-server` binds `127.0.0.1` by default (`server.host` in its `config.toml`). On Linux
+  a container reaches the host through the Docker bridge, not through loopback, so the
+  server has to listen on an address the bridge can reach. The API has no authentication;
+  do not expose it beyond the Docker network.
+- The `alas` service waits for the `sidecar` service to be healthy. Removing the service
+  means removing that `depends_on` entry too.
 
 ## Architecture Behavior by Host
 
-### amd64 (x86_64) Hosts
-All three containers run natively. No emulation overhead.
+`deploy/docker/Dockerfile` has no platform pin and installs no mxnet, so the `alas`
+container runs natively on amd64 and arm64. `gacha-server` builds natively for both.
+Nothing in the default setup needs x86 emulation.
 
-### arm64 (Apple Silicon) Hosts
-- **ALAS** (`alas`) -- runs natively on arm64.
-- **OCR Server** (`ocr`) -- runs under x86 emulation (`--platform=linux/amd64`).
-  Docker Desktop on macOS uses Rosetta 2 for this automatically.
-- **AI Sidecar** (`sidecar`) -- runs natively on arm64.
+## Legacy cnocr server
 
-## RPC Architecture
+Before the Rust sidecar, OCR ran in a separate x86 container because `mxnet 1.6.0` has no
+arm64 build, and ALAS talked to it over zerorpc on port 22268 (`OcrClientAddress: ocr:22268`).
+The server side is still in the tree:
 
-ALAS communicates with the OCR server over [zerorpc](https://www.zerorpc.io/) (TCP):
+- `deploy/docker/Dockerfile.ocr`, `deploy/docker/requirements-ocr.txt` -- the x86-pinned
+  image, started with `python -m module.ocr.rpc`
+- `start_ocr_server()` in `module/ocr/rpc.py` -- the zerorpc server
+- `StartOcrServer` / `OcrServerPort` -- start that server from the web UI
 
-```
-ALAS container  --zerorpc-->  OCR container
- (port 22267)                  (port 22268)
-```
-
-The connection is configured in the deploy template:
-
-- `UseOcrServer: true` -- tells ALAS to use the remote OCR server instead of loading
-  mxnet in-process.
-- `OcrClientAddress: ocr:22268` -- the Docker Compose service name `ocr` resolves to the
-  OCR container's IP on the shared network.
-- `StartOcrServer: false` -- the OCR server is started by Docker Compose, not by the
-  ALAS GUI.
-
-The OCR server loads cnocr models from `./bin/cnocr_models/` (mounted via the source
-volume) and exposes them over zerorpc. If the OCR server is unreachable, ALAS falls back
-to loading mxnet locally (which will fail on arm64 -- so the OCR container must be
-running).
+The client side is gone: `ModelProxy` in `module/ocr/rpc.py` speaks HTTP only, so this fork
+cannot use the zerorpc server, and uncommenting the `ocr` service does not bring the old
+setup back. The web UI therefore starts the zerorpc server only when `StartOcrServer` is
+`true` and `UseOcrServer` is `false`.
 
 ## Files
 
 - `deploy/docker/Dockerfile` -- main ALAS container (multi-arch, no platform pin)
-- `deploy/docker/Dockerfile.ocr` -- OCR server container (pinned to linux/amd64)
 - `deploy/docker/requirements.txt` -- Python deps for ALAS (no mxnet)
-- `deploy/docker/requirements-ocr.txt` -- Python deps for OCR server (mxnet + zerorpc)
-- `docker-compose.yml` -- orchestrates all three containers
-- `config/deploy.template-docker.yaml` -- deploy config with `UseOcrServer: true`
-- `module/ocr/rpc.py` -- OCR RPC server and client implementation
+- `docker-compose.yml` -- the `alas` and `sidecar` services
+- `deploy/template` -- source of every `config/deploy.template*.yaml`; regenerate them with
+  `ConfigGenerator.generate_deploy_template()` in `module/config/config_updater.py`
+- `config/deploy.template-docker.yaml` -- deploy config for Docker Compose
+- `module/ocr/rpc.py` -- HTTP OCR client, and the legacy zerorpc server
+- `ai_sidecar/` -- the Python sidecar
+- `deploy/docker/Dockerfile.ocr`, `deploy/docker/requirements-ocr.txt` -- legacy OCR server

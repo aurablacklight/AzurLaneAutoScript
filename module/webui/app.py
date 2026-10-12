@@ -52,7 +52,7 @@ from module.config.utils import (
     read_file,
 )
 from module.logger import logger
-from module.ocr.rpc import start_ocr_server_process, stop_ocr_server_process
+from module.ocr.rpc import should_start_legacy_ocr_server, start_ocr_server_process, stop_ocr_server_process
 from module.submodule.submodule import load_config
 from module.submodule.utils import get_config_mod
 from module.webui.base import Frame
@@ -1428,7 +1428,13 @@ def startup():
     if State.deploy_config.DiscordRichPresence:
         init_discord_rpc()
     if State.deploy_config.StartOcrServer:
-        start_ocr_server_process(State.deploy_config.OcrServerPort)
+        if should_start_legacy_ocr_server(
+                State.deploy_config.StartOcrServer, State.deploy_config.UseOcrServer):
+            start_ocr_server_process(State.deploy_config.OcrServerPort)
+        else:
+            logger.warning(
+                'StartOcrServer is set but UseOcrServer sends OCR to the HTTP server at '
+                f'{State.deploy_config.OcrClientAddress}, legacy ZeroRPC OCR server not started')
     if (
             State.deploy_config.EnableRemoteAccess
             and State.deploy_config.Password is not None

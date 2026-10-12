@@ -248,6 +248,25 @@ class ModelProxyFactory:
 # Legacy: ZeroRPC server functions. Not used when UseOcrServer points to Rust sidecar.
 # These are still needed if someone runs the old mxnet OCR server locally.
 
+def should_start_legacy_ocr_server(start_ocr_server, use_ocr_server):
+    """
+    Whether the web UI should launch the legacy ZeroRPC cnocr server.
+
+    ModelProxy above speaks HTTP only, so when UseOcrServer is set no alas
+    instance of this install can reach a ZeroRPC server. Launching one would
+    only import zerorpc, cnocr and mxnet, which an install that sends OCR to
+    the sidecar does not need and may not have.
+
+    Args:
+        start_ocr_server (bool): StartOcrServer in deploy setting.
+        use_ocr_server (bool): UseOcrServer in deploy setting.
+
+    Returns:
+        bool:
+    """
+    return bool(start_ocr_server) and not use_ocr_server
+
+
 def start_ocr_server(port=22268):
     import zerorpc
     import zmq
