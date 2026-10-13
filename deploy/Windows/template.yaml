@@ -72,16 +72,9 @@ Deploy:
     # [Default] true
     # [Legacy] false, every alas instance loads cnocr and mxnet itself, both must be installed
     UseOcrServer: true
-    # Whether to start the legacy ZeroRPC cnocr server when start GUI
-    # Ignored when the HTTP ocr server above is in use, alas instances cannot connect to it
-    # [Default] false
-    StartOcrServer: false
-    # Port of the legacy ZeroRPC cnocr server runs by GUI
-    # [Default] 22268
-    OcrServerPort: 22268
     # Address of the HTTP ocr server for alas instance to connect, in host:port without http://
     # [Default] 127.0.0.1:8484
-    # [Docker compose] host.docker.internal:8484
+    # [Docker compose] sidecar:8484, the service name in docker-compose.yml
     OcrClientAddress: 127.0.0.1:8484
 
   Update:

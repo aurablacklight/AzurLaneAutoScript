@@ -34,7 +34,7 @@ pypresence==4.2.1
 # Ocr
 # cnocr installed with --no-deps in Dockerfile to avoid numpy<1.20 conflict
 # cnocr==1.2.2
-# mxnet is in the OCR server container (deploy/docker/Dockerfile.ocr)
+# mxnet is not installed, OCR goes over HTTP to the gacha-server sidecar
 
 # Webui
 pywebio==1.6.2

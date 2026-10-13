@@ -2,7 +2,8 @@
 # docker run -v ${PWD}:/app/AzurLaneAutoScript -p 22267:22267 --name alas -it --rm hgjazhgj/alas
 #
 # Runs natively on both amd64 and arm64.
-# OCR (mxnet) is handled by the separate Dockerfile.ocr container.
+# OCR is not run in this image. ALAS sends it over HTTP to the gacha-server sidecar,
+# see COMPATIBILITY.md.
 
 FROM python:3.9-slim
 

@@ -4,99 +4,129 @@
 
 `docker-compose.yml` starts two containers:
 
-| Container  | Service name | Port  | Purpose |
-|------------|--------------|-------|---------|
-| ALAS       | `alas`       | 22267 | Main application and web UI |
-| AI Sidecar | `sidecar`    | 8484  | Python sidecar built from `./ai_sidecar` (`GET /health`, `POST /api/events`) |
+| Container | Service name | Port  | Purpose |
+|-----------|--------------|-------|---------|
+| ALAS      | `alas`       | 22267 | Main application and web UI |
+| Sidecar   | `sidecar`    | 8484  | `gacha-server`: OCR and the AI hook |
 
-A third service, `ocr` (cnocr/mxnet over zerorpc on port 22268), is commented out and kept
-for reference only. See [Legacy cnocr server](#legacy-cnocr-server).
-
-## OCR
-
-With the default settings ALAS does not run OCR itself. `module/ocr/rpc.py` sends every OCR
-call over HTTP to the Rust sidecar `gacha-server` from
-[rust-gacha-ocr-sidecar](https://github.com/aurablacklight/rust-gacha-ocr-sidecar), which
-listens on port 8484 by default:
+`gacha-server` is the Rust sidecar from
+[rust-gacha-ocr-sidecar](https://github.com/aurablacklight/rust-gacha-ocr-sidecar). One
+process answers everything ALAS sends:
 
 ```
 ALAS  --HTTP/JSON-->  gacha-server
-                       GET  /health          checked once when the client connects
+                       GET  /health          checked once when the OCR client connects
                        POST /ocr/recognize   one image, or a batch of up to 16
+                       POST /api/events      the AI hook
 ```
 
-`gacha-server` also answers `GET /health` and `POST /api/events`, the two endpoints of the
-Python sidecar, so one process serves both the AI hook and OCR.
+`deploy/docker/Dockerfile` has no platform pin and installs no mxnet, and the sidecar image
+is published for `linux/amd64` and `linux/arm64`. Both containers run natively on either
+architecture; nothing needs x86 emulation.
 
-The connection is configured in `config/deploy.yaml`:
+## Setting up the sidecar service
 
-- `UseOcrServer: true` -- send OCR to the HTTP server. With `false`, every ALAS instance
-  loads cnocr and mxnet in-process, which only works where both are installed (x86 only).
-- `OcrClientAddress` -- `host:port` of `gacha-server`, without `http://`.
-  - ALAS and `gacha-server` on the same host: `127.0.0.1:8484`
-  - ALAS in Docker Compose: `host.docker.internal:8484`. The `alas` service maps that name
-    to the host with `extra_hosts`.
-  - ALAS in a container started with `--net=host` (`deploy/docker/Docker-run.sh`):
-    `127.0.0.1:8484`
-- `StartOcrServer: false` -- this only controls the legacy zerorpc server and is ignored
-  while `UseOcrServer` is `true`.
+The `sidecar` service runs the published image
+`ghcr.io/aurablacklight/rust-gacha-ocr-sidecar:main`. It holds the server binary and nothing
+else, so four things have to be in place before `docker compose up`:
 
-Every shipped template sets `UseOcrServer: true`. `config/deploy.template-docker*.yaml` set
-`OcrClientAddress: host.docker.internal:8484`, the others `127.0.0.1:8484`. An existing
-`config/deploy.yaml` keeps the values it already has; change them by hand to move an install
-from the legacy path to the sidecar.
+1. **Registry login.** The image is a private package. Run `docker login ghcr.io` with a
+   token that can read packages, or the pull is refused.
+2. **AI provider key.** Copy `.env.example` to `.env` and set `ANTHROPIC_API_KEY`.
+   `OPENROUTER_API_KEY` is accepted too and wins if both are set. The server exits at
+   startup without a key, and the `alas` service then never starts, because it waits for a
+   healthy sidecar.
+3. **OCR models.** `./models/ocr` is mounted read-only at `/app/models/ocr`. Set
+   `GACHA_OCR_MODELS` in `.env` to use another directory. `scripts/download_models.sh` in
+   the sidecar repository downloads the models into this layout:
+
+   ```
+   models/ocr/det/pp-ocrv5_mobile_det.onnx
+   models/ocr/chinese/rec.onnx, dict.txt
+   models/ocr/english/rec.onnx, dict.txt
+   ```
+
+   Without the models the server still starts and is healthy, `GET /health` reports
+   `ocr_available: false`, and every OCR call answers 503.
+4. **Sidecar config.** `deploy/docker/gacha-server.toml` is mounted read-only at
+   `/app/config.toml`. It sets `server.host = "0.0.0.0"`, which the container needs: the
+   server's default `127.0.0.1` is the sidecar container's own loopback and the `alas`
+   container cannot reach it. The `[ai]` block holds the endpoint and the model. Set
+   `GACHA_SERVER_CONFIG` in `.env` to mount another file.
+
+Decision history is kept in the named volume `sidecar-state`, mounted at `/app/state`.
+
+The compose file defines no health check for the service. The image has no `curl` and
+brings its own check, which probes `GET /health` on port 8484; `depends_on` in the `alas`
+service waits for it.
+
+Port 8484 is published on the host's loopback only (`127.0.0.1:8484:8484`), because the
+sidecar has no authentication. The `alas` container does not use the published port.
+
+The Python sidecar in `./ai_sidecar` is no longer part of `docker-compose.yml`. It has no
+`/ocr/recognize`. The directory stays in the tree: its `tests/` hold the device-free tests
+of this fork.
+
+## How ALAS reaches the sidecar
+
+ALAS has two settings for the sidecar, one for OCR and one for the AI hook.
+
+| Used for | Setting | Default | Under Docker Compose |
+|----------|---------|---------|----------------------|
+| OCR      | `OcrClientAddress` in `config/deploy.yaml`, `host:port` without `http://` | `127.0.0.1:8484` | `sidecar:8484` |
+| AI hook  | `AiSidecar_SidecarUrl` in `module/config/config_generated.py` | `http://127.0.0.1:8484` | `http://sidecar:8484`, from the environment variable `AI_SIDECAR_URL` |
+
+Inside the `alas` container `127.0.0.1` is the container itself, so both have to name the
+`sidecar` service instead.
+
+- **OCR.** `config/deploy.template-docker.yaml` and `config/deploy.template-docker-cn.yaml`
+  set `OcrClientAddress: sidecar:8484`. Copy one of them to `config/deploy.yaml` before the
+  first start. If `config/deploy.yaml` does not exist, ALAS creates it from `deploy/template`
+  with `127.0.0.1:8484`, which does not work in the container.
+- **AI hook.** `docker-compose.yml` sets `AI_SIDECAR_URL=http://sidecar:8484` on the `alas`
+  service. `module/ai_hook/hook.py` uses that variable in place of `AiSidecar_SidecarUrl`
+  whenever it is set. Outside Docker the variable is unset and the default applies.
+
+`UseOcrServer` in `config/deploy.yaml` selects the OCR path:
+
+- `true` (every shipped template) -- send OCR to the HTTP server at `OcrClientAddress`.
+- `false` -- every ALAS instance loads cnocr and mxnet in-process, which only works where
+  both are installed (x86 only). The `alas` image has no mxnet.
 
 There is no local fallback. If the server is unreachable or answers with a 5xx, the request
 is tried 3 times and then raises; a 4xx raises immediately.
 
-### Known gap in Docker Compose
+Outside Docker Compose:
 
-The `sidecar` service is still the Python sidecar. It has no `/ocr/recognize`, so with the
-compose file as shipped every OCR call fails with HTTP 404. It also publishes host port
-8484, the port `gacha-server` uses.
+- ALAS and `gacha-server` on the same host: `127.0.0.1:8484`, the default.
+- ALAS in a container started with `--net=host` (`deploy/docker/Docker-run.sh`):
+  `127.0.0.1:8484`.
 
-Until the compose file runs `gacha-server` (a container image is tracked in
-[rust-gacha-ocr-sidecar#50](https://github.com/aurablacklight/rust-gacha-ocr-sidecar/issues/50)),
-run `gacha-server` on the host in place of the `sidecar` service, so that it is what listens
-on host port 8484. Two things to check:
+## Existing installs
 
-- `gacha-server` binds `127.0.0.1` by default (`server.host` in its `config.toml`). On Linux
-  a container reaches the host through the Docker bridge, not through loopback, so the
-  server has to listen on an address the bridge can reach. The API has no authentication;
-  do not expose it beyond the Docker network.
-- The `alas` service waits for the `sidecar` service to be healthy. Removing the service
-  means removing that `depends_on` entry too.
+An existing `config/deploy.yaml` is not migrated. It keeps the values it already has, and
+they have to be changed by hand to move an install to the sidecar:
 
-## Architecture Behavior by Host
+- An install that says `UseOcrServer: false` keeps running cnocr in-process.
+- A Docker install made before the sidecar says `OcrClientAddress: ocr:22268`. Change it to
+  `sidecar:8484`; the `ocr` service no longer exists.
 
-`deploy/docker/Dockerfile` has no platform pin and installs no mxnet, so the `alas`
-container runs natively on amd64 and arm64. `gacha-server` builds natively for both.
-Nothing in the default setup needs x86 emulation.
-
-## Legacy cnocr server
-
-Before the Rust sidecar, OCR ran in a separate x86 container because `mxnet 1.6.0` has no
-arm64 build, and ALAS talked to it over zerorpc on port 22268 (`OcrClientAddress: ocr:22268`).
-The server side is still in the tree:
-
-- `deploy/docker/Dockerfile.ocr`, `deploy/docker/requirements-ocr.txt` -- the x86-pinned
-  image, started with `python -m module.ocr.rpc`
-- `start_ocr_server()` in `module/ocr/rpc.py` -- the zerorpc server
-- `StartOcrServer` / `OcrServerPort` -- start that server from the web UI
-
-The client side is gone: `ModelProxy` in `module/ocr/rpc.py` speaks HTTP only, so this fork
-cannot use the zerorpc server, and uncommenting the `ocr` service does not bring the old
-setup back. The web UI therefore starts the zerorpc server only when `StartOcrServer` is
-`true` and `UseOcrServer` is `false`.
+The legacy cnocr server (cnocr/mxnet over zerorpc on port 22268) has been removed, together
+with its `ocr` compose service, `deploy/docker/Dockerfile.ocr`, and the deploy settings
+`StartOcrServer` and `OcrServerPort`. Nothing reads those two keys any more. Lines for them
+in an existing `config/deploy.yaml` are ignored and disappear the next time ALAS writes the
+file.
 
 ## Files
 
+- `docker-compose.yml` -- the `alas` and `sidecar` services
 - `deploy/docker/Dockerfile` -- main ALAS container (multi-arch, no platform pin)
 - `deploy/docker/requirements.txt` -- Python deps for ALAS (no mxnet)
-- `docker-compose.yml` -- the `alas` and `sidecar` services
+- `deploy/docker/gacha-server.toml` -- config mounted into the `sidecar` service
+- `.env.example` -- provider key and optional paths for the `sidecar` service
 - `deploy/template` -- source of every `config/deploy.template*.yaml`; regenerate them with
   `ConfigGenerator.generate_deploy_template()` in `module/config/config_updater.py`
 - `config/deploy.template-docker.yaml` -- deploy config for Docker Compose
-- `module/ocr/rpc.py` -- HTTP OCR client, and the legacy zerorpc server
-- `ai_sidecar/` -- the Python sidecar
-- `deploy/docker/Dockerfile.ocr`, `deploy/docker/requirements-ocr.txt` -- legacy OCR server
+- `module/ocr/rpc.py` -- HTTP OCR client
+- `module/ai_hook/hook.py` -- AI hook client
+- `ai_sidecar/` -- the earlier Python sidecar and the device-free tests
