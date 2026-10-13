@@ -42,6 +42,21 @@ def test_screenshot_to_base64_converts_numpy_array():
     assert decoded[:4] == b'\x89PNG'
 
 
+def test_screenshot_to_base64_keeps_the_colours_of_an_rgb_frame():
+    """ALAS frames are RGB; the PNG must decode to the same colours, not red and blue exchanged."""
+    import cv2
+
+    client = AISidecarClient(MockConfig())
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+    image[:, :] = (255, 128, 0)  # orange, in RGB order
+    result = client.screenshot_to_base64(image)
+    decoded = cv2.imdecode(np.frombuffer(base64.b64decode(result), dtype=np.uint8), cv2.IMREAD_COLOR)
+    # OpenCV decodes to BGR, so an orange pixel reads (0, 128, 255).
+    assert tuple(int(v) for v in decoded[0, 0]) == (0, 128, 255)
+    # The caller's frame is left as it was.
+    assert tuple(int(v) for v in image[0, 0]) == (255, 128, 0)
+
+
 def test_screenshot_to_base64_returns_none_for_none():
     """screenshot_to_base64 returns None when given None."""
     client = AISidecarClient(MockConfig())
