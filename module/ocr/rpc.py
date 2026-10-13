@@ -1,15 +1,10 @@
-import argparse
 import base64
-import multiprocessing
-import pickle
 import time
 
 import requests
 
 from module.logger import logger
 from module.webui.setting import State
-
-process: multiprocessing.Process = None
 
 
 def _encode_image(img_fp):
@@ -243,100 +238,3 @@ class ModelProxyFactory:
 
     def close(self):
         ModelProxy.close()
-
-
-# Legacy: ZeroRPC server functions. Not used when UseOcrServer points to Rust sidecar.
-# These are still needed if someone runs the old mxnet OCR server locally.
-
-def start_ocr_server(port=22268):
-    import zerorpc
-    import zmq
-    from module.ocr.al_ocr import AlOcr
-    from module.ocr.models import OcrModel
-
-    class OCRServer(OcrModel):
-        def hello(self):
-            return "hello"
-
-        def ocr(self, lang, img_fp):
-            img_fp = pickle.loads(img_fp)
-            cnocr: AlOcr = self.__getattribute__(lang)
-            return cnocr.ocr(img_fp)
-
-        def ocr_for_single_line(self, lang, img_fp):
-            img_fp = pickle.loads(img_fp)
-            cnocr: AlOcr = self.__getattribute__(lang)
-            return cnocr.ocr_for_single_line(img_fp)
-
-        def ocr_for_single_lines(self, lang, img_list):
-            img_list = [pickle.loads(img_fp) for img_fp in img_list]
-            cnocr: AlOcr = self.__getattribute__(lang)
-            return cnocr.ocr_for_single_lines(img_list)
-
-        def set_cand_alphabet(self, lang, cand_alphabet):
-            cnocr: AlOcr = self.__getattribute__(lang)
-            return cnocr.set_cand_alphabet(cand_alphabet)
-
-        def atomic_ocr(self, lang, img_fp, cand_alphabet):
-            img_fp = pickle.loads(img_fp)
-            cnocr: AlOcr = self.__getattribute__(lang)
-            return cnocr.atomic_ocr(img_fp, cand_alphabet)
-
-        def atomic_ocr_for_single_line(self, lang, img_fp, cand_alphabet):
-            img_fp = pickle.loads(img_fp)
-            cnocr: AlOcr = self.__getattribute__(lang)
-            return cnocr.atomic_ocr_for_single_line(img_fp, cand_alphabet)
-
-        def atomic_ocr_for_single_lines(self, lang, img_list, cand_alphabet):
-            img_list = [pickle.loads(img_fp) for img_fp in img_list]
-            cnocr: AlOcr = self.__getattribute__(lang)
-            return cnocr.atomic_ocr_for_single_lines(img_list, cand_alphabet)
-
-        def debug(self, lang, img_list):
-            img_list = [pickle.loads(img_fp) for img_fp in img_list]
-            cnocr: AlOcr = self.__getattribute__(lang)
-            return cnocr.debug(img_list)
-
-    server = zerorpc.Server(OCRServer())
-    try:
-        server.bind(f"tcp://*:{port}")
-    except zmq.error.ZMQError:
-        logger.error(f"Ocr server cannot bind on port {port}")
-        return
-    logger.info(f"Ocr server listen on port {port}")
-    server.run()
-
-
-def start_ocr_server_process(port=22268):
-    global process
-    if not alive():
-        process = multiprocessing.Process(target=start_ocr_server, args=(port,))
-        process.start()
-
-
-def stop_ocr_server_process():
-    global process
-    if alive():
-        process.kill()
-        process = None
-
-
-def alive() -> bool:
-    global process
-    if process is not None:
-        return process.is_alive()
-    else:
-        return False
-
-
-if __name__ == "__main__":
-    # Run server
-    parser = argparse.ArgumentParser(description="Alas OCR service")
-    parser.add_argument(
-        "--port",
-        type=int,
-        help="Port to listen. Default to OcrServerPort in deploy setting",
-    )
-    args, _ = parser.parse_known_args()
-    port = args.port or State.deploy_config.OcrServerPort
-    start_ocr_server(port=port)

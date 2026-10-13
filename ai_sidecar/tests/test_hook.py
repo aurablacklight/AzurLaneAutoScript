@@ -147,3 +147,36 @@ def test_disabled_client_returns_none():
 
     assert result is None
     mock_post.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Sidecar address
+# ---------------------------------------------------------------------------
+
+def test_url_comes_from_config_when_environment_is_unset(monkeypatch):
+    """Outside Docker AI_SIDECAR_URL is unset and AiSidecar_SidecarUrl applies."""
+    monkeypatch.delenv('AI_SIDECAR_URL', raising=False)
+    client = AISidecarClient(MockConfig(url='http://127.0.0.1:8484'))
+    assert client.url == 'http://127.0.0.1:8484'
+
+
+@pytest.mark.parametrize('value', ['', '   '])
+def test_empty_environment_url_is_ignored(monkeypatch, value):
+    monkeypatch.setenv('AI_SIDECAR_URL', value)
+    client = AISidecarClient(MockConfig(url='http://127.0.0.1:8484'))
+    assert client.url == 'http://127.0.0.1:8484'
+
+
+def test_environment_url_wins_over_config(monkeypatch):
+    """docker-compose.yml sets AI_SIDECAR_URL, where 127.0.0.1 is the alas container itself."""
+    monkeypatch.setenv('AI_SIDECAR_URL', 'http://sidecar:8484/')
+    client = AISidecarClient(MockConfig(url='http://127.0.0.1:8484'))
+    assert client.url == 'http://sidecar:8484'
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {'ok': True}
+    with patch('hook.requests.post', return_value=mock_response) as mock_post:
+        client.notify('heartbeat', {})
+
+    assert mock_post.call_args[0][0] == 'http://sidecar:8484/api/events'

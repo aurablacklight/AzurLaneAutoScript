@@ -10,6 +10,7 @@ Do NOT use 3.8+ features:
 """
 import base64
 import logging
+import os
 import time
 
 import cv2
@@ -24,6 +25,11 @@ class AISidecarClient:
     def __init__(self, config):
         self.enabled = getattr(config, 'AiSidecar_Enabled', False)
         self.url = getattr(config, 'AiSidecar_SidecarUrl', 'http://sidecar:8484')
+        # AI_SIDECAR_URL wins when it is set. docker-compose.yml sets it, because the
+        # default 127.0.0.1 is the alas container itself there, not the sidecar.
+        env_url = os.environ.get('AI_SIDECAR_URL', '').strip().rstrip('/')
+        if env_url:
+            self.url = env_url
         self._last_cycle_start = 0.0
         self._cooldown = 60  # seconds
 

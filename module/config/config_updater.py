@@ -490,6 +490,9 @@ class ConfigGenerator:
             'PythonExecutable': '/usr/local/bin/python',
             'RequirementsFile': './deploy/docker/requirements.txt',
             'AdbExecutable': '/usr/bin/adb',
+            # 127.0.0.1 is the alas container itself. `sidecar` is the service in
+            # docker-compose.yml that runs gacha-server, reached over the compose network.
+            'OcrClientAddress': 'sidecar:8484',
         }
 
         linux = {

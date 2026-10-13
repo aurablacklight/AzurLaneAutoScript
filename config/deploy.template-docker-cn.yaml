@@ -65,23 +65,17 @@ Deploy:
     InstallUiautomator2: true
 
   Ocr:
-    # Run Ocr as a service, can reduce memory usage by not import mxnet everytime you start an alas instance
+    # Run Ocr as a service outside the alas instances
+    # This fork sends OCR over HTTP to the Rust sidecar `gacha-server` (https://github.com/aurablacklight/rust-gacha-ocr-sidecar)
 
-    # Whether to use ocr server
-    # [Docker] true — OCR runs in a separate container
-    # [Default] false
+    # Whether to use the HTTP ocr server
+    # [Default] true
+    # [Legacy] false, every alas instance loads cnocr and mxnet itself, both must be installed
     UseOcrServer: true
-    # Whether to start ocr server when start GUI
-    # [Docker] false — the ocr container starts independently
-    # [Default] false
-    StartOcrServer: false
-    # Port of ocr server runs by GUI
-    # [Default] 22268
-    OcrServerPort: 22268
-    # Address of ocr server for alas instance to connect
-    # [Docker] ocr:22268 — 'ocr' is the docker-compose service name
-    # [Default] 127.0.0.1:22268
-    OcrClientAddress: ocr:22268
+    # Address of the HTTP ocr server for alas instance to connect, in host:port without http://
+    # [Default] 127.0.0.1:8484
+    # [Docker compose] sidecar:8484, the service name in docker-compose.yml
+    OcrClientAddress: sidecar:8484
 
   Update:
     # Use auto update and builtin updater feature

@@ -10,8 +10,14 @@ services:
       - '.:/app/AzurLaneAutoScript:rw'
       - '/etc/localtime:/etc/localtime:ro'
     environment:
-      - AI_SIDECAR_URL=http://host.docker.internal:8484
-      - OCR_SERVER_URL=http://host.docker.internal:8484
+      # Read by the AI hook (module/ai_hook/hook.py) in place of its default
+      # http://127.0.0.1:8484, which inside this container is the container itself.
+      - AI_SIDECAR_URL=http://sidecar:8484
+      # The OCR address is not an environment variable. It is OcrClientAddress in
+      # config/deploy.yaml, and config/deploy.template-docker.yaml sets sidecar:8484.
+      #
+      # ALAS does not read EMULATOR_SERIAL. Set the serial in the ALAS profile
+      # (Alas > Emulator > Serial); host.docker.internal is mapped to the host below.
       - EMULATOR_SERIAL=${EMULATOR_SERIAL:-host.docker.internal:5555}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -20,38 +26,34 @@ services:
         condition: service_healthy
     container_name: alas
 
-  # OCR now handled by Rust sidecar on port 8484.
-  # Uncomment to use legacy mxnet/cnocr OCR server instead.
-  # ocr:
-  #   build:
-  #     context: ./deploy/docker/
-  #     dockerfile: ./Dockerfile.ocr
-  #   platform: linux/amd64
-  #   ports:
-  #     - "22268:22268"
-  #   volumes:
-  #     - '.:/app/AzurLaneAutoScript:rw'
-  #   container_name: alas-ocr
-
+  # The Rust sidecar `gacha-server`: https://github.com/aurablacklight/rust-gacha-ocr-sidecar
+  # It serves OCR (POST /ocr/recognize) and the AI hook (POST /api/events) on port 8484.
+  #
+  # The image is a private package. Run `docker login ghcr.io` with a token that can
+  # read packages before the first `docker compose pull` or `docker compose up`.
+  # It is built for linux/amd64 and linux/arm64. See COMPATIBILITY.md.
   sidecar:
-    build:
-      context: ./ai_sidecar
-      dockerfile: Dockerfile
+    image: ghcr.io/aurablacklight/rust-gacha-ocr-sidecar:main
     ports:
-      - "8484:8484"
+      # Host loopback only, because the sidecar has no authentication. The alas service
+      # does not use this mapping, it connects to sidecar:8484 on the compose network.
+      - "127.0.0.1:8484:8484"
     volumes:
-      - sidecar-data:/data
-      - ./ai_sidecar/prompts:/app/prompts:ro
+      # The server reads /app/config.toml. server.host must be "0.0.0.0" in it,
+      # the server's own default 127.0.0.1 cannot be reached from the alas container.
+      - '${GACHA_SERVER_CONFIG:-./deploy/docker/gacha-server.toml}:/app/config.toml:ro'
+      # PaddleOCR models. Without them the server starts, but every OCR call answers 503.
+      - '${GACHA_OCR_MODELS:-./models/ocr}:/app/models/ocr:ro'
+      # Decision history
+      - sidecar-state:/app/state
     environment:
-      - AI_API_KEY=${AI_API_KEY:-}
-      - AI_BASE_URL=${AI_BASE_URL:-https://api.openai.com/v1}
-      - AI_MODEL=${AI_MODEL:-gpt-4o}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8484/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      # AI provider key, passed through from the shell or from .env. The server does not
+      # start without one of the two.
+      - ANTHROPIC_API_KEY
+      - OPENROUTER_API_KEY
+    # No healthcheck here: the image has no curl and brings its own check, which probes
+    # GET /health on port 8484. `depends_on` above waits for it.
     container_name: alas-sidecar
 
 volumes:
-  sidecar-data:
+  sidecar-state:

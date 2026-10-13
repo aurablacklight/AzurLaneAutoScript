@@ -6,7 +6,6 @@ from tqdm import tqdm
 from module.base.decorator import cached_property
 from module.base.utils import load_image
 from module.logger import logger
-from module.ocr.al_ocr import AlOcr
 from module.ocr.ocr import Ocr
 from module.statistics.battle_status import BattleStatusStatistics
 from module.statistics.campaign_bonus import CampaignBonusStatistics
@@ -24,7 +23,12 @@ class DropStatistics:
     CSV_ENCODING = 'utf-8'
 
     def __init__(self):
-        AlOcr.CNOCR_CONTEXT = DropStatistics.CNOCR_CONTEXT
+        from module.webui.setting import State
+        if not State.deploy_config.UseOcrServer:
+            # CNOCR_CONTEXT only matters to the in-process cnocr models. Imported here
+            # because cnocr and mxnet are not installed when OCR goes to the HTTP server.
+            from module.ocr.al_ocr import AlOcr
+            AlOcr.CNOCR_CONTEXT = DropStatistics.CNOCR_CONTEXT
         Ocr.SHOW_LOG = False
         if not os.path.exists(self.template_folder):
             shutil.copytree(DropStatistics.TEMPLATE_BASIC, self.template_folder)
