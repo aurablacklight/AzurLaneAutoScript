@@ -38,6 +38,10 @@ class AISidecarClient:
         if image is None:
             return None
         try:
+            # ALAS keeps frames in RGB order and OpenCV encodes BGR. Without the conversion
+            # the sidecar and the model receive the frame with red and blue exchanged.
+            if getattr(image, 'ndim', 0) == 3 and image.shape[2] == 3:
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
             _, buffer = cv2.imencode('.png', image)
             return base64.b64encode(buffer).decode('utf-8')
         except Exception as e:
