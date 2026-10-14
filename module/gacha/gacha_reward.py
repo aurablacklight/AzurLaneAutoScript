@@ -231,9 +231,11 @@ class RewardGacha(GachaUI, Retirement):
                 confirm_timer.reset()
                 continue
 
-            if self.appear(GET_SHIP, interval=1):
+            if self.appear(GET_SHIP, offset=(20, 20), interval=1):
                 self.device.click(STORY_SKIP)  # Fast forward for multiple orders
                 confirm_timer.reset()
+                continue
+            if self.handle_get_items_ship():
                 continue
 
             if self.appear(BUILD_FINISH_RESULTS, offset=(20, 150), interval=3):

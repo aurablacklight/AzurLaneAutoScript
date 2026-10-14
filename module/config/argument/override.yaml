@@ -28,8 +28,6 @@ Main3:
     Event: campaign_main
 GemsFarming:
   Campaign:
-    Event:
-      value: campaign_main
     Mode: normal
     UseClearMode: true
     UseFleetLock: true
@@ -46,20 +44,33 @@ GemsFarming:
       display: display
       value: fleet1_all_fleet2_standby
       option: [ fleet1_all_fleet2_standby, fleet1_standby_fleet2_all ]
+  Emotion:
+    Mode: calculate_ignore
+    Fleet1Control: prevent_red_face
+    Fleet1Recover: not_in_dormitory
+    Fleet1Oath: false
+    Fleet2Value: 119
+    Fleet2Record: 2020-01-01 00:00:00
+    Fleet2Control: prevent_red_face
+    Fleet2Recover: not_in_dormitory
+    Fleet2Oath: false
+  Submarine:
+    Mode:
+      display: display
+      value: do_not_use
+      option: [ do_not_use, hunt_only ]
+    AutoSearchMode: sub_standby
+    DistanceToBoss: use_open_ocean_support
 
 # ==================== Event ====================
 
 Event:
   Campaign:
     Mode: normal
-    Event:
-      type: state
     AmbushEvade: true
 Event2:
   Campaign:
     Mode: normal
-    Event:
-      type: state
     AmbushEvade: true
 EventA:
   Scheduler:
@@ -68,8 +79,6 @@ EventA:
     ServerUpdate: 00:00
   Campaign:
     Name: dynamic
-    Event:
-      type: state
     Mode: normal
     Use2xBook: false
     AmbushEvade: true
@@ -86,8 +95,6 @@ EventB:
     ServerUpdate: 00:00
   Campaign:
     Name: dynamic
-    Event:
-      type: state
     Mode: normal
     Use2xBook: false
     AmbushEvade: true
@@ -104,8 +111,6 @@ EventC:
     ServerUpdate: 00:00
   Campaign:
     Name: dynamic
-    Event:
-      type: state
     Mode: normal
     Use2xBook: false
     AmbushEvade: true
@@ -122,8 +127,6 @@ EventD:
     ServerUpdate: 00:00
   Campaign:
     Name: dynamic
-    Event:
-      type: state
     Mode: normal
     Use2xBook: false
     AmbushEvade: true
@@ -140,8 +143,6 @@ EventSp:
     ServerUpdate: 00:00
   Campaign:
     Name: sp
-    Event:
-      type: state
     Mode: normal
     Use2xBook: false
     AmbushEvade: true
@@ -156,8 +157,6 @@ EventSp:
 Raid:
   Campaign:
     Name: dynamic
-    Event:
-      type: state
     Mode: normal
     UseClearMode: true
     UseFleetLock: true
@@ -198,8 +197,6 @@ RaidDaily:
     ServerUpdate: 00:00
   Campaign:
     Name: dynamic
-    Event:
-      type: state
     Mode: normal
     UseClearMode: true
     UseFleetLock: true
@@ -218,19 +215,12 @@ RaidDaily:
     Fleet2Control: prevent_yellow_face
     Fleet2Recover: not_in_dormitory
     Fleet2Oath: false
-MaritimeEscort:
-  Scheduler:
-    SuccessInterval: 30
-    FailureInterval: 30
-    ServerUpdate: 00:00
 Coalition:
   Scheduler:
     SuccessInterval: 30
     FailureInterval: 30
     ServerUpdate: 00:00
   Campaign:
-    Event:
-      type: state
     Name: dynamic
     Mode: normal
     UseClearMode: true
@@ -238,9 +228,9 @@ Coalition:
     UseAutoSearch: false
     Use2xBook: false
     AmbushEvade: true
-#  Coalition:
-#    Mode:
-#      option: [ easy, normal, hard, ex ]
+  Coalition:
+    Mode:
+      option: [ easy, normal, hard, sp ]
   StopCondition:
     MapAchievement: non_stop
     StageIncrease: false
@@ -259,8 +249,6 @@ CoalitionSp:
     ServerUpdate: 00:00
   Campaign:
     Name: sp
-    Event:
-      type: state
     Mode: normal
     UseClearMode: true
     UseFleetLock: true
@@ -281,6 +269,11 @@ CoalitionSp:
     Fleet2Control: prevent_yellow_face
     Fleet2Recover: not_in_dormitory
     Fleet2Oath: false
+EventShop:
+  Scheduler:
+    SuccessInterval: 30
+    FailureInterval: 30
+    ServerUpdate: 00:00
 
 # ==================== Reward ====================
 
@@ -450,6 +443,12 @@ OpsiHazard1Leveling:
     ServerUpdate: 00:00, 12:00
   OpsiFleet:
     Submarine: false
+
+# =================== Island ===================
+
+IslandCollect:
+  Scheduler:
+    ServerUpdate: 03:00, 18:00
 
 # ==================== Tool ====================
 
