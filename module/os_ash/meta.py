@@ -41,6 +41,13 @@ class MetaDigitCounter(DigitCounter):
         if re.match(r'^[0123]3$', result):
             result = f'{result[0]}/{result[1]}'
 
+        # 1/40/1400 -> 140/1400
+        for suffix in ['/1400', '/200']:
+            if result.endswith(suffix):
+                point = result[:-len(suffix)]
+                point = point.replace('/', '')
+                result = point + suffix
+
         return result
 
 
@@ -564,7 +571,7 @@ class AshBeaconAssist(Meta):
         tier = self.config.OpsiAshAssist_Tier
         logger.info('Begin find a level ' + str(tier) + ' meta')
         for n in range(10):
-            if self.image_color_count(BEACON_TIER, color=(0, 0, 0), threshold=221, count=50):
+            if self.image_color_count(BEACON_TIER, color=(0, 0, 0), threshold=30, count=50):
                 break
 
             self.device.screenshot()
