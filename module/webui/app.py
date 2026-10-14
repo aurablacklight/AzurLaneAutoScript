@@ -43,6 +43,7 @@ import module.webui.lang as lang
 from module.config.config import AzurLaneConfig, Function
 from module.config.deep import deep_get, deep_iter, deep_set
 from module.config.env import IS_ON_PHONE_CLOUD
+from module.config.server import to_server
 from module.config.utils import (
     alas_instance,
     alas_template,
@@ -123,6 +124,11 @@ class AlasGUI(Frame):
     @use_scope("aside", clear=True)
     def set_aside(self) -> None:
         # TODO: update put_icon_buttons()
+
+        current_date = datetime.now().date()
+        if current_date.month == 4 and current_date.day == 1:
+            self.af_flag = True
+
         put_icon_buttons(
             Icon.DEVELOP,
             buttons=[{"label": t("Gui.Aside.Home"), "value": "Home", "color": "aside"}],
@@ -145,9 +151,6 @@ class AlasGUI(Frame):
             onclick=[lambda: go_app("manage", new_window=False)],
         )
 
-        current_date = datetime.now().date()
-        if current_date.month == 4 and current_date.day == 1:
-            self.af_flag = True
 
     @use_scope("aside_instance")
     def set_aside_status(self) -> None:
@@ -309,6 +312,7 @@ class AlasGUI(Frame):
     @use_scope("groups")
     def set_group(self, group, arg_dict, config, task):
         group_name = group[0]
+        server = to_server(deep_get(config, "Alas.Emulator.PackageName", "cn"))
 
         output_list: List[Output] = []
         for arg, arg_dict in deep_iter(arg_dict, depth=1):
@@ -339,7 +343,23 @@ class AlasGUI(Frame):
             # Default value
             output_kwargs["value"] = value
             # Options
-            output_kwargs["options"] = options = output_kwargs.pop("option", [])
+            options = output_kwargs.pop("option", [])
+            server_options = output_kwargs.get(f"option_{server}")
+            if output_kwargs["widget_type"] == "select" and isinstance(server_options, list) and server_options:
+                options = server_options
+            output_kwargs["options"] = options
+            if (
+                task == "GemsFarming"
+                and group_name == "Campaign"
+                and arg_name == "Event"
+                and output_kwargs["widget_type"] == "select"
+                and len(options) == 1
+            ):
+                continue
+            if output_kwargs["widget_type"] == "select" and len(options) == 1:
+                only_option = options[0]
+                if only_option in output_kwargs.get("option_bold", []):
+                    output_kwargs["widget_type"] = "state"
             # Options label
             options_label = []
             for opt in options:
@@ -1101,6 +1121,19 @@ class AlasGUI(Frame):
     def show(self) -> None:
         self._show()
         self.load_home = True
+        # Create state_switch before rendering aside buttons, so that
+        # ui_alas() (invoked by clicking aside buttons, possibly before
+        # the rest of show() finishes on slow machines) never touches an
+        # uninitialized member. Reuse existing instance on repeated
+        # show() calls (language/theme change, ui_develop) to keep the
+        # original single-instance semantics and avoid resetting its
+        # internal state generator.
+        if not hasattr(self, "state_switch"):
+            self.state_switch = Switch(
+                status=self.set_status,
+                get_state=lambda: getattr(getattr(self, "alas", -1), "state", 0),
+                name="state",
+            )
         self.set_aside()
         self.init_aside(name="Home")
         self.dev_set_menu()
@@ -1221,12 +1254,6 @@ class AlasGUI(Frame):
             },
             get_state=get_window_visibility_state,
             name="visibility_state",
-        )
-
-        self.state_switch = Switch(
-            status=self.set_status,
-            get_state=lambda: getattr(getattr(self, "alas", -1), "state", 0),
-            name="state",
         )
 
         def goto_update():

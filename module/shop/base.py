@@ -19,6 +19,7 @@ FILTER_REGEX = re.compile(
     '|chip|coin|cube|drill|food'
     '|plate|retrofit|pr|dr|specializedcore'
     '|logger|tuning'
+    '|type93pureoxygentorpedo|type1armorpiercingshell|superheavyshell'
     '|hecombatplan|fragment|hiddenzonedatalogger'
     '|albacore|bataan|bearn|bluegill|carabiniere|casablanca|contedicavour|dukeofyork'
     '|echo|eldridge|gangut|glorious|grenville|hibiki|hunter|icarus'
@@ -35,9 +36,9 @@ FILTER_REGEX = re.compile(
     '|red|blue|yellow'
     '|general|gun|torpedo|antiair|plane|wild'
     '|dd|cl|bb|cv'
-    '|iris'
+    '|iris|sardegna'
     '|abyssal|archive|obscure|unlock'
-    '|combat|offense|survival)?'
+    '|combat|offence|offense|survival)?'
 
     '(s[1-5]|t[1-6])?$',
     flags=re.IGNORECASE)
@@ -217,7 +218,7 @@ class ShopBase(UI):
             bool:
         """
         # Handle shop obstructions
-        if self.appear(GET_SHIP, interval=1):
+        if self.appear(GET_SHIP, offset=(20, 20), interval=1):
             logger.info(f'Shop obstruct: {GET_SHIP} -> {SHOP_CLICK_SAFE_AREA}')
             self.device.click(SHOP_CLICK_SAFE_AREA)
             return True
@@ -358,6 +359,8 @@ class ShopBase(UI):
 
         # Second, load selection, apply filter,
         # and return 1st item in result if any
+        if not self.shop_filter:
+            return None
         FILTER.load(self.shop_filter)
         filtered = FILTER.apply(items, self.shop_check_item)
 

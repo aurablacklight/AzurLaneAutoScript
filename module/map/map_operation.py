@@ -157,7 +157,11 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
                     continue
 
                 # Map preparation
-                if map_timer.reached() and self.handle_map_mode_switch(mode) and self.handle_map_preparation():
+                if map_timer.reached() and self.handle_map_mode_switch(mode):
+                    prep_button = self.handle_map_preparation()
+                else:
+                    prep_button = None
+                if prep_button:
                     self.map_get_info()
                     self.handle_map_walk_speedup()
                     self.handle_fast_forward()
@@ -166,10 +170,14 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
                         self.enter_map_cancel()
                         self.handle_map_stop()
                         raise ScriptEnd(f'Reach condition: {self.config.StopCondition_MapAchievement}')
-                    self.device.click(MAP_PREPARATION)
+                    self.device.click(prep_button)
                     map_click += 1
                     map_timer.reset()
                     campaign_timer.reset()
+                    # always clear self.map_fleet_checked after MAP_PREPARATION
+                    # we will enter FLEET_PREPARATION very soon,
+                    # fleets get reset when leaving FLEET_PREPARATION, it only get stored after entering stage,
+                    self.map_fleet_checked = False
                     continue
 
                 # Fleet preparation
@@ -180,6 +188,11 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
                         self.handle_auto_submarine_call_disable()
                         self.handle_auto_search_setting()
                         self.map_fleet_checked = True
+                        # re-check FLEET_PREPARATION after tons of preparation clicks
+                        # and also update FLEET_PREPARATION.button because fleet_bar re-detected it as avoid_area
+                        if not self.appear(FLEET_PREPARATION, offset=(20, 50)):
+                            logger.warning('FLEET_PREPARATION button disappeared after fleet_preparation()')
+                            continue
                     self.device.click(FLEET_PREPARATION)
                     fleet_click += 1
                     fleet_timer.reset()
@@ -197,6 +210,10 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
 
                 # Use Data Key
                 if self.handle_use_data_key():
+                    continue
+
+                # 16-1/16-2 submarine support popup
+                if self.handle_submarine_support_popup():
                     continue
 
                 # Emotion
@@ -231,6 +248,9 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
                         logger.warning('Entered map with is_combat_loading appeared')
                         break
                 else:
+                    if hasattr(self, 'is_combat_loading') and self.is_combat_loading():
+                        logger.warning('Entered map with is_combat_loading appeared')
+                        break
                     if self.handle_in_map_with_enemy_searching():
                         # self.handle_map_after_combat_story()
                         break
@@ -249,7 +269,8 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
             if self.is_in_stage():
                 break
 
-            if self.appear(MAP_PREPARATION, offset=(20, 20), interval=2):
+            if self.appear(MAP_PREPARATION, offset=(20, 20), interval=2) \
+                    or self.appear(MAP_PREPARATION_HARD, offset=(20, 20), interval=2):
                 self.device.click(MAP_PREPARATION_CANCEL)
                 continue
             if self.appear(FLEET_PREPARATION, offset=(20, 50), interval=2):
@@ -308,7 +329,7 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
             MAP_MODE_SWITCH_HARD5,
             MAP_MODE_SWITCH_HARD6,
         ]:
-            if self.appear(button, offset=(20, 20), threshold=0.7):
+            if self.appear(button, offset=(20, 20), similarity=0.7):
                 if active:
                     return self._is_mod_switch_hard_active(button)
                 else:
@@ -330,21 +351,27 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
     def handle_map_preparation(self):
         """
         Returns:
-            bool: If MAP_PREPARATION and tha animation of map information finished
+            Button | None: The MAP_PREPARATION button (normal or hard) if the
+                map preparation page appears and the animation of map
+                information finished, else None.
         """
-        if not self.appear(MAP_PREPARATION, offset=(20, 20)):
+        if self.appear(MAP_PREPARATION, offset=(20, 20)):
+            prep_button = MAP_PREPARATION
+        elif self.appear(MAP_PREPARATION_HARD, offset=(20, 20)):
+            prep_button = MAP_PREPARATION_HARD
+        else:
             self.map_clear_percentage_prev = -1
             self.map_clear_percentage_timer.reset()
-            return False
+            return None
         if not self.config.MAP_HAS_CLEAR_PERCENTAGE:
             logger.attr('MAP_HAS_CLEAR_PERCENTAGE', self.config.MAP_HAS_CLEAR_PERCENTAGE)
-            return True
+            return prep_button
         if self.config.MAP_IS_ONE_TIME_STAGE:
             logger.attr('MAP_IS_ONE_TIME_STAGE', self.config.MAP_IS_ONE_TIME_STAGE)
-            return True
+            return prep_button
         # info_bar covers percentage and MAP_GREEN
         if self.info_bar_count():
-            return False
+            return None
 
         percent = self.get_map_clear_percentage()
         logger.attr('Map_clear_percentage', f'{int(percent * 100)}%')
@@ -352,17 +379,17 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
         # 2022.08.21 Still enable this when `percent` was raised from 0.
         if percent > 0.95 and 0 <= self.map_clear_percentage_prev < 0.95:
             # map clear percentage 100%, exit directly
-            return True
+            return prep_button
         if abs(percent - self.map_clear_percentage_prev) < 0.02:
             self.map_clear_percentage_prev = percent
             if self.map_clear_percentage_timer.reached():
-                return True
+                return prep_button
             else:
-                return False
+                return None
         else:
             self.map_clear_percentage_prev = percent
             self.map_clear_percentage_timer.reset()
-            return False
+            return None
 
     def withdraw(self, skip_first_screenshot=True):
         """
@@ -397,14 +424,14 @@ class MapOperation(MysteryHandler, FleetPreparation, Retirement, FastForwardHand
         """
         if not self.map_cat_attack_timer.reached():
             return False
-        if self.image_color_count(MAP_CAT_ATTACK, color=(255, 231, 123), threshold=221, count=100):
+        if self.image_color_count(MAP_CAT_ATTACK, color=(255, 231, 123), threshold=30, count=100):
             logger.info('Skip map cat attack')
             self.device.click(MAP_CAT_ATTACK)
             self.map_cat_attack_timer.reset()
             return True
         if not self.map_is_clear_mode:
             # Threat: Med has 106 pixels count, MAP_CAT_ATTACK_MIRROR has 290.
-            if self.image_color_count(MAP_CAT_ATTACK_MIRROR, color=(255, 231, 123), threshold=221, count=200):
+            if self.image_color_count(MAP_CAT_ATTACK_MIRROR, color=(255, 231, 123), threshold=30, count=200):
                 logger.info('Skip map being attack')
                 self.device.click(MAP_CAT_ATTACK)
                 self.map_cat_attack_timer.reset()
