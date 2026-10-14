@@ -215,6 +215,11 @@ class RewardDorm(UI):
         logger.warning(f'Current control method {self.config.Emulator_ControlMethod} '
                        f'does not support DOWN/UP events, use multi-click instead')
         self.device.multi_click(button, count)
+        # The DOWN/UP variants screenshot while they hold the tap and _dorm_feed_click reuses
+        # the image they leave. Leave a fresh one here too, or the next food count is read from
+        # the screen as it was before these clicks and the same clicks are sent again.
+        self.device.sleep((0.5, 0.8))
+        self.device.screenshot()
 
     def dorm_view_reset(self):
         """
