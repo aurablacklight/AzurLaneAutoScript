@@ -36,7 +36,9 @@ class Campaign(CampaignBase):
     #         logger.hr('Campaign end')
 
     def _expected_end(self, expected):
-        return 'in_stage'
+        if 'boss' in expected:
+            return 'in_stage'
+        return super()._expected_end(expected)
 
     def clear_boss(self):
         grids = self.map.select(is_boss=True)
