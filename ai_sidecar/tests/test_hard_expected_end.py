@@ -1,4 +1,5 @@
-"""Hard combat end detection using the real campaign loader and inheritance."""
+"""Hard battle dispatch and combat end detection using the real campaign loader."""
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -46,3 +47,31 @@ def test_first_hard_3_2_mob_returns_to_map(hard_campaign):
 def test_hard_boss_returns_to_stage(hard_campaign, expected, battle_count):
     hard_campaign.battle_count = battle_count
     assert hard_campaign._expected_end(expected) == 'in_stage'
+
+
+@pytest.mark.parametrize('battle_count', [0, 6])
+def test_hard_switches_from_mobs_to_visible_boss(hard_campaign, monkeypatch, battle_count):
+    campaign = hard_campaign
+    campaign.map = deepcopy(campaign.MAP)
+    campaign.map.reset()
+    campaign.battle_count = battle_count
+    campaign.config.POOR_MAP_DATA = False
+    campaign.config.MAP_CLEAR_ALL_THIS_TIME = False
+    campaign.config.Error_HandleError = False
+    clear_enemy = MagicMock(return_value=True)
+    clear_boss = MagicMock(return_value=True)
+    monkeypatch.setattr(campaign, 'clear_enemy', clear_enemy)
+    monkeypatch.setattr(campaign, 'brute_clear_boss', clear_boss)
+
+    assert not campaign.map.select(is_boss=True)
+    assert campaign.execute_a_battle() is True
+    clear_enemy.assert_called_once_with()
+    clear_boss.assert_not_called()
+
+    # The live failure occurred when H1 became the boss after six mob fights.
+    campaign.map[(7, 0)].is_boss = True
+    clear_enemy.reset_mock()
+    clear_enemy.return_value = False
+    assert campaign.execute_a_battle() is True
+    clear_boss.assert_called_once_with()
+    clear_enemy.assert_not_called()

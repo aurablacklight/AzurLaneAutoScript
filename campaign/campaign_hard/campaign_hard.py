@@ -40,6 +40,11 @@ class Campaign(CampaignBase):
             return 'in_stage'
         return super()._expected_end(expected)
 
+    def battle_default(self):
+        if self.map.select(is_boss=True):
+            return self.battle_boss()
+        return super().battle_default()
+
     def clear_boss(self):
         grids = self.map.select(is_boss=True)
         grids = grids.add(self.map.select(may_boss=True, is_enemy=True))
