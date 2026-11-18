@@ -11,12 +11,12 @@ class ExecutionError(Exception):
 
 class ConfigModel:
     # Git
-    Repository: str = "https://github.com/LmeSzinc/AzurLaneAutoScript"
-    Branch: str = "master"
+    Repository: str = "https://github.com/aurablacklight/AzurLaneAutoScript"
+    Branch: str = "recover/ai-hook-2026-07-16"
     GitExecutable: str = "./toolkit/Git/mingw64/bin/git.exe"
     GitProxy: Optional[str] = None
     SSLVerify: bool = False
-    AutoUpdate: bool = True
+    AutoUpdate: bool = False
 
     # Python
     PythonExecutable: str = "./toolkit/python.exe"

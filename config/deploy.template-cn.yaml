@@ -1,13 +1,12 @@
 Deploy:
   Git:
     # URL of AzurLaneAutoScript repository
-    # [CN user] Use 'git://git.lyoko.io/AzurLaneAutoScript' for faster and more stable download
-    # [Other] Use 'https://github.com/LmeSzinc/AzurLaneAutoScript'
-    Repository: git://git.lyoko.io/AzurLaneAutoScript
+    # This is a fork. Upstream is 'https://github.com/LmeSzinc/AzurLaneAutoScript'; pointing
+    # an update at it replaces the fork's code (the AI hook and the HTTP OCR client).
+    Repository: https://github.com/aurablacklight/AzurLaneAutoScript
     # Branch of Alas
-    # [Developer] Use 'dev', 'app', etc, to try new features
-    # [Other] Use 'master', the stable branch
-    Branch: master
+    # 'recover/ai-hook-2026-07-16' is the branch the fork runs. The fork's 'master' is older.
+    Branch: recover/ai-hook-2026-07-16
     # Filepath of git executable `git.exe`
     # [Easy installer] Use './toolkit/Git/mingw64/bin/git.exe'
     # [Other] Use you own git
@@ -20,9 +19,9 @@ Deploy:
     # [In most cases] Use true
     # [Other] Use false to when connected to an untrusted network
     SSLVerify: true
-    # Update Alas at startup
-    # [In most cases] Use true
-    AutoUpdate: true
+    # Update Alas at startup and at AutoRestartTime, with `git reset --hard` to Repository/Branch
+    # [This fork] Use false. The harness pins an exact commit, and an update moves the checkout off it
+    AutoUpdate: false
 
   Python:
     # Filepath of python executable `python.exe`
