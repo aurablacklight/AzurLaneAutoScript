@@ -457,6 +457,10 @@ class ResearchProject:
         self.raw_series = series
         # 'S4'
         self.series = f'S{series}'
+        # The name as the OCR returned it, such as '0-057-UL'. Kept for the log.
+        self.raw_name = name
+        # How get_data() found the project: 'name', 'genre_guessed', 'c_for_d' or 'number'
+        self.matched_by = ''
         # 'D-057-UL'
         self.name = self.check_name(name)
         if self.name != name:
@@ -500,9 +504,41 @@ class ResearchProject:
                     self.ship_rarity = 'dr' if re.search(ResearchProject.REGEX_DR_SHIP, self.ship) else 'pry'
             break
 
-        if not matched:
-            logger.warning(f'Invalid research {self}')
+        if matched:
+            self.log_match()
+        else:
+            if not self.name:
+                # An empty slot, or a card with something drawn over its name.
+                reason = 'no name was read'
+            elif series:
+                reason = f'no series {series} project has that name'
+            else:
+                # The series template did not match, so no name could have been found.
+                reason = 'the series was not read'
+            logger.warning(f'Invalid research {self}: read as {name!r}, {reason}')
             self.valid = False
+
+    def log_match(self):
+        """
+        Say how the project was found when it was not found by the name as read.
+        A name read correctly logs nothing; a repaired letter is logged by __init__ as "revised".
+        """
+        read, found = self.raw_name, self.data['name']
+        if self.matched_by == 'genre_guessed':
+            logger.info(f'Research name {read!r} has no genre letter, taken as {found}')
+            # Two projects of one series can differ by that letter only. D goes first because
+            # it is the letter the OCR cannot read; if a card was really the other project,
+            # this line is where it shows.
+            for data in LIST_RESEARCH_PROJECT:
+                if data['series'] == self.raw_series and data['name'] != found \
+                        and data['name'][1:] == found[1:]:
+                    logger.warning(f'Research name {read!r} taken as {found}, but {data["name"]} '
+                                   f'of series {self.raw_series} differs by that letter only')
+        elif self.matched_by == 'c_for_d':
+            logger.info(f'Research name {read!r} taken as {found}, the C was read as D')
+        elif self.matched_by == 'number':
+            logger.info(f'Research name {read!r} matched {found} by genre and number, '
+                        f'its ending was not read')
 
     def __str__(self):
         if self.valid:
@@ -542,7 +578,10 @@ class ResearchProject:
 
             if prefix in ['I1', 'U']:
                 prefix = 'D'
-            prefix = prefix.strip('I1')
+            # A genre is a letter, so I, 1 and 0 here are a letter that was not read.
+            # 0-792-MI -> -792-MI -> D-792-MI: the D of this font is a box, and the OCR
+            # sidecar's models return it as 0, as 1, or not at all.
+            prefix = prefix.strip('I10')
             # LC-038-RF -> C-038-RF
             prefix = prefix.replace('LC', 'C')
 
@@ -567,6 +606,9 @@ class ResearchProject:
             # I-483-RF revised to -483-RF -> D-483-RF
             if prefix == '' and number in ResearchProject.D_PROJECT_NUMBERS:
                 prefix = 'D'
+            # 0-185-MI -> -185-MI -> C-185-MI
+            if prefix == '' and number in ResearchProject.C_PROJECT_NUMBERS:
+                prefix = 'C'
             # L-153-MI -> C-153-MI
             if prefix == 'L' and number in ResearchProject.C_PROJECT_NUMBERS:
                 prefix = 'C'
@@ -588,15 +630,20 @@ class ResearchProject:
         """
         for data in LIST_RESEARCH_PROJECT:
             if (data['series'] == series) and (data['name'] == name):
+                self.matched_by = 'name'
                 yield data
 
         if len(name) and name[0].isdigit():
-            for t in 'QGE':
+            # The genre letter was not read at all: -744-MI. D and C go before upstream's
+            # Q, G and E, because D is the letter the OCR sidecar's models cannot read and
+            # C is one they sometimes lose; they read the other letters.
+            for t in 'DCQGE':
                 name1 = f'{t}-{self.name}'
                 logger.info(f'Testing the most similar candidate {name1}')
                 for data in LIST_RESEARCH_PROJECT:
                     if (data['series'] == series) and (data['name'] == name1):
                         self.name = name1
+                        self.matched_by = 'genre_guessed'
                         yield data
 
         if name.startswith('D'):
@@ -605,10 +652,12 @@ class ResearchProject:
             for data in LIST_RESEARCH_PROJECT:
                 if (data['series'] == series) and (data['name'] == name1):
                     self.name = name1
+                    self.matched_by = 'c_for_d'
                     yield data
 
         for data in LIST_RESEARCH_PROJECT:
             if (data['series'] == series) and (data['name'].rstrip('MIRFUL-') == name.rstrip('MIRFUL-')):
+                self.matched_by = 'number'
                 yield data
 
         return False

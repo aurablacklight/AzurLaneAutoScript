@@ -129,6 +129,11 @@ class ResearchSelector(ResearchUI):
 
             if timeout.reached():
                 logger.warning('Failed to OCR research name after 3 trial, assume correct')
+                # Which cards, and what the OCR returned for them: these are left out of
+                # the selection below.
+                invalid = [f'{p} read as {p.raw_name!r}' for p in projects if not p.valid]
+                if invalid:
+                    logger.warning(f'Research names still invalid: {", ".join(invalid)}')
                 break
 
             if sum([p.valid for p in projects]) < 5:
