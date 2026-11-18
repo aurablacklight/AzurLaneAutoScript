@@ -89,6 +89,7 @@ class AzurLaneAutoScript:
             for name in task_order:
                 if isinstance(name, str) and name in ready and name not in order:
                     order.append(name)
+            # One-shot: config.get_next_task() takes it at the next selection.
             self.config._sidecar_task_order = tuple(order)
             logger.info(f'AI sidecar: ready task priority {order}; NextRun unchanged')
         elif action == 'skip':
@@ -142,6 +143,17 @@ class AzurLaneAutoScript:
             logger.warning(f'AI sidecar: pausing automation — {reason}')
             logger.warning('AI sidecar: current scheduler run will stop; press Start in the GUI to resume')
             self._ai_pause = True
+            # The loop ends quietly on a pause, so alert like the crash paths
+            # in run() do. The flag is already set: a notifier that fails
+            # must not keep the pause from taking effect.
+            try:
+                handle_notify(
+                    self.config.Error_OnePushConfig,
+                    title=f"Alas <{self.config_name}> paused",
+                    content=f"<{self.config_name}> AI sidecar pause\n{reason}",
+                )
+            except Exception as e:
+                logger.warning(f'AI sidecar: pause notification failed: {type(e).__name__}: {e}')
 
     @cached_property
     def config(self):
@@ -209,9 +221,17 @@ class AzurLaneAutoScript:
                     })
                     if self._apply_directive(directive, task=task_name) is True:
                         self._task_deferred = True
-                        return False
-                except Exception:
-                    pass  # sidecar errors must never break ALAS
+                        # The task stays deferred either way. Whether the game
+                        # also needs a restart depends on the screen it is on.
+                        page = self._recognised_page()
+                        if page is not None:
+                            logger.info(f'AI sidecar: `{task_name}` deferred on {page}, no restart needed')
+                            return False
+                        logger.warning(f'AI sidecar: `{task_name}` deferred, but the game is not on a page '
+                                       f'Alas recognises; scheduling Restart')
+                except Exception as e:
+                    # sidecar errors must never break ALAS
+                    logger.warning(f'AI sidecar: unknown_state hook failed: {type(e).__name__}: {e}')
             logger.warning(f'Game stuck, {self.device.package} will be restarted in 10 seconds')
             logger.warning('If you are playing by hand, please stop Alas')
             self.config.task_call('Restart')
@@ -266,6 +286,39 @@ class AzurLaneAutoScript:
                 content=f"<{self.config_name}> Exception occured",
             )
             exit(1)
+
+    def _recognised_page(self):
+        """
+        The page the game is on, if it is one Alas can navigate from.
+
+        Asked after a confirmed skip of a stuck task. On a recognised page the
+        next task finds its own way, so the game is left alone. On any other
+        screen the next task would end in GamePageUnknownError, which stops
+        Alas, so the caller schedules Restart.
+
+        Takes a fresh screenshot and runs only the page check buttons of
+        module/ui/page.py over it, as `UI.ui_get_current_page()` does for
+        known pages. Unlike that method it does not tap GOTO_MAIN, does not
+        handle popups and does not raise.
+
+        Returns:
+            str | None: Page name such as `page_reshmenu`. None when no page
+                check button appears or the check itself failed; never raises.
+        """
+        try:
+            from module.ui.page import Page
+            from module.ui.ui import UI
+            ui = UI(self.config, device=self.device)
+            self.device.screenshot()
+            for page in Page.iter_pages():
+                if page.check_button is None:
+                    continue
+                if ui.ui_page_appear(page=page):
+                    return page.name
+            return None
+        except Exception as e:
+            logger.warning(f'AI sidecar: page check failed: {type(e).__name__}: {e}')
+            return None
 
     def _last_screenshot_base64(self):
         """
@@ -786,8 +839,8 @@ class AzurLaneAutoScript:
                         task = self.get_next_task()
                     else:
                         self._apply_directive(directive)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'AI sidecar: cycle_start hook failed: {type(e).__name__}: {e}')
                 # Pause issued at cycle_start: jump to loop top, which breaks
                 if self._ai_pause:
                     continue
@@ -837,8 +890,8 @@ class AzurLaneAutoScript:
                             payload["screenshot"] = screenshot
                         directive = self._sidecar.notify("task_failed", payload)
                         self._apply_directive(directive, task=task)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'AI sidecar: task result hook failed: {type(e).__name__}: {e}')
 
             # Check failures
             failed = deep_get(self.failure_record, keys=task, default=0)
