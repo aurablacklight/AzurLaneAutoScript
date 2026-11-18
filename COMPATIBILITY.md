@@ -182,6 +182,24 @@ Known gaps, left as they are:
 - **Oil on EN** is read from an area 8 px wider than upstream's. A five-digit amount reaches
   the edge of upstream's area and loses a digit, which could end a campaign on a false "Reach
   oil limit".
+- **Research project names.** The sidecar's models cannot read the D of the font on the
+  project cards: it comes back as `0`, as `1`, or not at all, and a C is sometimes lost the
+  same way. The other letters are read. `module/research/project.py` therefore:
+  - treats a leading `0` as upstream treats `1` and `I`, as a letter that was not read, and
+    names it D or C from the project number;
+  - gives a name with no letter D, C, Q, G and E in that order and takes the first that is a
+    project of the card's series (upstream tries Q, G, E).
+
+  Five pairs of projects differ by that letter only: S4 `063-UL` (D, H), S4 `068-UL` (D, Q),
+  S4 `368-MI` (D, Q), S6 `339-MI` (D, H) and S8 `387-MI` (D, H). D is taken, and a warning
+  names the other project. A name that lost both its letter and its ending (`-774-M`) stays
+  invalid, as upstream leaves it.
+- **What the research log says.** A name read correctly logs nothing. Otherwise one line says
+  how it was matched: `is revised to` (a repaired letter or ending), `has no genre letter,
+  taken as`, `the C was read as D`, or `matched ... by genre and number, its ending was not
+  read`. `Invalid research` gives what the OCR returned and the cause: `no series N project has
+  that name`, `the series was not read`, or `no name was read`. When the retries on one screen
+  run out, `Research names still invalid:` lists the cards left out of the selection.
 - **`cnocr` on the CN server** is served by the sidecar's English model and cannot read Chinese.
   EN is not affected.
 
