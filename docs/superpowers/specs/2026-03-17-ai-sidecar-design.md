@@ -1,5 +1,13 @@
 # AI Sidecar for ALAS — Design Spec
 
+> **Historical, 2026-03-17. This is not how the fork works now.** It specifies a Python FastAPI
+> sidecar in `./ai_sidecar`. That sidecar was replaced by the Rust `gacha-server`
+> ([rust-gacha-ocr-sidecar](https://github.com/aurablacklight/rust-gacha-ocr-sidecar)) and removed
+> from this repository on 2026-11-17, and the hook's behaviour has changed since: `skip` delays
+> are clamped, `reprioritize` no longer rewrites `NextRun`, `pause` never touches `stop_event`,
+> and OCR depends on the sidecar. The current description is
+> [COMPATIBILITY.md](../../../COMPATIBILITY.md).
+
 ## Overview
 
 Add AI-driven task prioritization to AzurLaneAutoScript (ALAS) via an event-driven sidecar service. The AI sidecar runs alongside ALAS in Docker, receives game state events, consults an OpenAI-compatible AI provider, and returns task directives.
