@@ -429,6 +429,64 @@ def test_two_results_for_a_single_image_raises(stub, proxy):
 
 
 # ---------------------------------------------------------------------------
+# Low-confidence readings are logged and returned unchanged
+# ---------------------------------------------------------------------------
+
+def reading(text, confidence=None):
+    result = {'text': text, 'model': 'azur_lane'}
+    if confidence is not None:
+        result['confidence'] = confidence
+    return (200, {'results': [result], 'duration_ms': 1})
+
+
+def low_confidence_messages(log):
+    return [record.getMessage() for record in log
+            if record.levelname == 'WARNING' and 'low confidence' in record.getMessage()]
+
+
+def test_low_confidence_whitelisted_reading_is_logged_and_kept(stub, proxy, log):
+    stub.replies = [reading('24', 0.27), reading('24', 0.9)]
+
+    unsure = proxy.atomic_ocr_for_single_lines([image(1)], '0123456789')
+    sure = proxy.atomic_ocr_for_single_lines([image(1)], '0123456789')
+
+    assert unsure == sure
+    assert low_confidence_messages(log) == ["OCR low confidence 0.27 for '24'"]
+
+
+def test_low_confidence_is_logged_for_a_single_image_too(stub, proxy, log):
+    stub.replies = [reading('2283', 0.4)]
+
+    proxy.atomic_ocr_for_single_line(image(1), '0123456789')
+
+    assert low_confidence_messages(log) == ["OCR low confidence 0.40 for '2283'"]
+
+
+@pytest.mark.parametrize('reply, alphabet', [
+    (reading('22843', 0.5), '0123456789'),      # at the line, not under it
+    (reading('22843', 0.94), '0123456789'),
+    (reading('', 0.0), '0123456789'),           # nothing was read; there is nothing to doubt
+    (reading('22843'), '0123456789'),           # a server that sends no confidence
+    (reading('22843', True), '0123456789'),     # not a number
+])
+def test_other_whitelisted_readings_are_not_logged(stub, proxy, log, reply, alphabet):
+    stub.replies = [reply]
+
+    proxy.atomic_ocr_for_single_lines([image(1)], alphabet)
+
+    assert low_confidence_messages(log) == []
+
+
+def test_free_text_is_not_logged(stub, proxy, log):
+    # No whitelist: on free text the confidence does not separate right from wrong.
+    stub.replies = [reading('Urgent Mission', 0.2)]
+
+    proxy.ocr_for_single_lines([image(1)])
+
+    assert low_confidence_messages(log) == []
+
+
+# ---------------------------------------------------------------------------
 # init and the health check
 # ---------------------------------------------------------------------------
 

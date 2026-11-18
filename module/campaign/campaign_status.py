@@ -83,23 +83,43 @@ class CampaignStatus(UI):
 
         return amount
 
+    @staticmethod
+    def _oil_area():
+        """
+        Area of the oil amount.
+
+        On EN a five-digit amount reaches the right edge of OCR_OIL, and the sidecar's
+        model then drops digits: 22364 read as 24, 22843 as 2283. A reading like that is
+        over 100, so get_oil() accepts it, and a campaign stops on "Reach oil limit" with
+        20,000 oil in hand. On 53 crops from real EN frames, 8 were misread with the
+        stock area and none with it 8 px wider (measured 2026-11-17).
+
+        Returns:
+            tuple: (x1, y1, x2, y2)
+        """
+        x1, y1, x2, y2 = OCR_OIL.area
+        if server.server == 'en':
+            return x1, y1, x2 + 8, y2
+        return x1, y1, x2, y2
+
     def _get_oil(self):
         # Update offset
         _ = self.appear(OCR_OIL_CHECK)
 
+        area = self._oil_area()
         color = get_color(self.device.image, OCR_OIL_CHECK.button)
         if color_similar(color, OCR_OIL_CHECK.color):
             # Original color
             if server.server != 'jp':
-                ocr = Digit(OCR_OIL, name='OCR_OIL', letter=(247, 247, 247), threshold=128)
+                ocr = Digit(area, name='OCR_OIL', letter=(247, 247, 247), threshold=128)
             else:
-                ocr = Digit(OCR_OIL, name='OCR_OIL', letter=(201, 201, 201), threshold=128)
+                ocr = Digit(area, name='OCR_OIL', letter=(201, 201, 201), threshold=128)
         elif color_similar(color, (59, 59, 64)):
             # With black overlay
-            ocr = Digit(OCR_OIL, name='OCR_OIL', letter=(165, 165, 165), threshold=128)
+            ocr = Digit(area, name='OCR_OIL', letter=(165, 165, 165), threshold=128)
         else:
             logger.warning(f'Unexpected OCR_OIL_CHECK color')
-            ocr = Digit(OCR_OIL, name='OCR_OIL', letter=(247, 247, 247), threshold=128)
+            ocr = Digit(area, name='OCR_OIL', letter=(247, 247, 247), threshold=128)
 
         return ocr.ocr(self.device.image)
 

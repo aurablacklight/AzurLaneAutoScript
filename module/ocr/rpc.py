@@ -47,6 +47,8 @@ class ModelProxy:
     # A request that meets both kinds of failure can draw on both lists; that stays under
     # the two worst cases added together (86 s).
     retry_delays = (0.2, 0.4)
+    # A whitelisted reading under this confidence is logged, not rejected; see `_result_texts`.
+    low_confidence = 0.5
 
     @classmethod
     def init(cls, address="127.0.0.1:8484"):
@@ -147,15 +149,22 @@ class ModelProxy:
             time.sleep(delays[failures])
 
     @staticmethod
-    def _result_texts(data, expected):
+    def _result_texts(data, expected, cand_alphabet=None):
         """Take the text of each result, refusing a response of the wrong length.
 
         Results are matched to images by position, so a missing or extra result
         would put every later reading on the wrong item.
 
+        A whitelisted reading (a number, a counter, a timer) that the sidecar is
+        unsure of is logged and returned unchanged. The sidecar's `confidence` is
+        one mean softmax probability per string. On real EN crops the wrong oil
+        readings all sat under 0.5 and so did 2 of 178 correct readings; other
+        digit fields are unmeasured, so nothing is rejected on it yet.
+
         Args:
             data (dict): Parsed JSON response.
             expected (int): Number of images that were sent.
+            cand_alphabet (str): The whitelist the request carried, if any.
 
         Returns:
             list[str]:
@@ -164,7 +173,15 @@ class ModelProxy:
         if len(results) != expected:
             raise RuntimeError('OCR server returned %s results for %s images'
                                % (len(results), expected))
-        return [r["text"] for r in results]
+        texts = [r["text"] for r in results]
+        if cand_alphabet is not None:
+            for r in results:
+                confidence = r.get("confidence") if isinstance(r, dict) else None
+                if r["text"] and isinstance(confidence, (int, float)) \
+                        and not isinstance(confidence, bool) \
+                        and confidence < ModelProxy.low_confidence:
+                    logger.warning('OCR low confidence %.2f for %r' % (confidence, r["text"]))
+        return texts
 
     def _post_batch(self, img_list, cand_alphabet=None):
         """OCR a list of images, splitting oversized batches.
@@ -193,7 +210,7 @@ class ModelProxy:
             if cand_alphabet is not None:
                 body["cand_alphabet"] = cand_alphabet
             data = self._post(body)
-            results.extend(self._result_texts(data, len(chunk)))
+            results.extend(self._result_texts(data, len(chunk), cand_alphabet))
         return results
 
     def _post_single(self, img_fp, cand_alphabet=None):
@@ -210,7 +227,7 @@ class ModelProxy:
         if cand_alphabet is not None:
             body["cand_alphabet"] = cand_alphabet
         data = self._post(body)
-        return self._result_texts(data, 1)[0]
+        return self._result_texts(data, 1, cand_alphabet)[0]
 
     def ocr(self, img_fp):
         """
