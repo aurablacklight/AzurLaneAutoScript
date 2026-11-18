@@ -9,14 +9,15 @@ Do NOT use 3.8+ features:
 - No positional-only parameters (/)
 """
 import base64
-import logging
 import os
 import time
 
 import cv2
 import requests
 
-logger = logging.getLogger(__name__)
+# ALAS's own logger, so that hook failures reach the ALAS log file.
+# logging.getLogger(__name__) has no handler there and its warnings were lost.
+from module.logger import logger
 
 from typing import Any, Dict, Optional
 
@@ -45,7 +46,7 @@ class AISidecarClient:
             _, buffer = cv2.imencode('.png', image)
             return base64.b64encode(buffer).decode('utf-8')
         except Exception as e:
-            logger.warning('Failed to encode screenshot: %s', e)
+            logger.warning(f'Failed to encode screenshot: {e}')
             return None
 
     def notify(self, event_type, payload):
@@ -68,14 +69,17 @@ class AISidecarClient:
                 timeout=(5, 30),
             )
             if resp.status_code == 200:
-                return resp.json()
+                try:
+                    return resp.json()
+                except ValueError as e:
+                    # The sidecar answered; its body is not a directive.
+                    logger.warning(
+                        f'Sidecar returned a non-JSON body for event {event_type} (status 200): {e}')
+                    return None
             else:
                 logger.warning(
-                    'Sidecar returned status %d for event %s',
-                    resp.status_code,
-                    event_type,
-                )
+                    f'Sidecar returned status {resp.status_code} for event {event_type}')
                 return None
         except Exception as e:
-            logger.warning('Sidecar unreachable for event %s: %s', event_type, e)
+            logger.warning(f'Sidecar unreachable for event {event_type}: {e}')
             return None

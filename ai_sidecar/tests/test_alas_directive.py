@@ -179,6 +179,28 @@ class TestUnknownStatePayload:
         assert 'flashing bug' in payload['error']
         assert payload['count'] == 0
 
+    def test_unknown_state_hook_error_is_logged_and_keeps_native_restart(self, monkeypatch):
+        """An error while building the event or applying the directive is logged, never raised."""
+        instance = make_instance()
+        instance.__dict__['device'] = MagicMock()
+        instance._sidecar = MagicMock()
+        instance._sidecar.notify.side_effect = RuntimeError('sidecar exploded')
+        instance.save_error_log = lambda: None
+        warning = MagicMock()
+        monkeypatch.setattr(alas.logger, 'warning', warning)
+
+        def commission():
+            raise GameStuckError('Wait too long')
+        instance.commission = commission
+
+        result = instance.run('commission', skip_first_screenshot=True)
+
+        assert result is False
+        assert not instance._task_deferred
+        instance.config.task_call.assert_called_once_with('Restart')
+        logged = [str(call[0][0]) for call in warning.call_args_list]
+        assert any('unknown_state' in text and 'RuntimeError: sidecar exploded' in text for text in logged)
+
 
 class TestClampSkipDelay:
     def test_commission_is_clamped_below_the_12h_ceiling(self):

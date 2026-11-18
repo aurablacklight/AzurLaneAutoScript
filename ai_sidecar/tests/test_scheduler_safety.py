@@ -608,3 +608,20 @@ def test_task_failed_hook_error_does_not_stop_scheduler(monkeypatch):
     assert len(_task_failed_calls(client)) == 1
     # Failure accounting still ran after the hook raised, and the next task succeeded.
     assert runner.failure_record['Research'] == 0
+
+
+@pytest.mark.parametrize('event', ['cycle_start', 'task_failed'])
+def test_loop_hook_error_is_logged_and_does_not_stop_scheduler(monkeypatch, event):
+    """Errors raised while building an event or applying its directive used to vanish in `except: pass`."""
+    def notify(name, payload):
+        if name == event:
+            raise RuntimeError('sidecar exploded')
+        return None
+    runner, client = _task_failed_runner(monkeypatch, [False, 'stop'], notify)
+    warning = MagicMock()
+    monkeypatch.setattr(alas.logger, 'warning', warning)
+    runner.loop()
+    assert runner.run.call_count == 2
+    assert runner.failure_record['Research'] == 0
+    logged = [str(call[0][0]) for call in warning.call_args_list]
+    assert any('hook failed' in text and 'RuntimeError: sidecar exploded' in text for text in logged)

@@ -229,8 +229,9 @@ class AzurLaneAutoScript:
                             return False
                         logger.warning(f'AI sidecar: `{task_name}` deferred, but the game is not on a page '
                                        f'Alas recognises; scheduling Restart')
-                except Exception:
-                    pass  # sidecar errors must never break ALAS
+                except Exception as e:
+                    # sidecar errors must never break ALAS
+                    logger.warning(f'AI sidecar: unknown_state hook failed: {type(e).__name__}: {e}')
             logger.warning(f'Game stuck, {self.device.package} will be restarted in 10 seconds')
             logger.warning('If you are playing by hand, please stop Alas')
             self.config.task_call('Restart')
@@ -838,8 +839,8 @@ class AzurLaneAutoScript:
                         task = self.get_next_task()
                     else:
                         self._apply_directive(directive)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'AI sidecar: cycle_start hook failed: {type(e).__name__}: {e}')
                 # Pause issued at cycle_start: jump to loop top, which breaks
                 if self._ai_pause:
                     continue
@@ -889,8 +890,8 @@ class AzurLaneAutoScript:
                             payload["screenshot"] = screenshot
                         directive = self._sidecar.notify("task_failed", payload)
                         self._apply_directive(directive, task=task)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f'AI sidecar: task result hook failed: {type(e).__name__}: {e}')
 
             # Check failures
             failed = deep_get(self.failure_record, keys=task, default=0)
