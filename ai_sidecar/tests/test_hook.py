@@ -7,7 +7,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "module", "ai_hook"))
-# The hook logs through ALAS's logger, which it imports as `module.logger`.
+# The hook logs through ALAS's logger, which it takes by name ('alas') without importing module.logger.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import base64

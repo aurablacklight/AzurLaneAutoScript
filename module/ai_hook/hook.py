@@ -9,15 +9,18 @@ Do NOT use 3.8+ features:
 - No positional-only parameters (/)
 """
 import base64
+import logging
 import os
 import time
 
 import cv2
 import requests
 
-# ALAS's own logger, so that hook failures reach the ALAS log file.
-# logging.getLogger(__name__) has no handler there and its warnings were lost.
-from module.logger import logger
+# ALAS's own logger (module/logger.py names it 'alas'), so that hook failures reach the
+# ALAS log file. logging.getLogger(__name__) has no handler there and its warnings were lost.
+# Taken by name, not imported from module.logger, so that this file still imports on its own:
+# the harness's hook-check and dispatch-check load it without ALAS's logger module.
+logger = logging.getLogger('alas')
 
 from typing import Any, Dict, Optional
 
