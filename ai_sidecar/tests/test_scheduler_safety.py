@@ -176,6 +176,38 @@ def test_reprioritize_changes_ready_order_without_changing_deadlines(profile):
     assert [t.command for t in reloaded.pending_task] == ['Restart', 'Commission', 'Dorm']
 
 
+def test_reprioritize_order_applies_to_one_selection_then_is_cleared(profile):
+    runner, _ = profile(next_minutes=120, extra={
+        'Commission': {'Enable': True, 'NextRun': str(NOW - timedelta(minutes=1))},
+        'Dorm': {'Enable': True, 'NextRun': str(NOW - timedelta(minutes=1))},
+    })
+    runner._apply_directive({'action': 'reprioritize', 'task_order': ['Dorm', 'Commission']})
+    # The selection the order was given for.
+    assert runner.config.get_next().command == 'Dorm'
+    assert [t.command for t in runner.config.pending_task] == ['Dorm', 'Commission']
+    # Every later selection on the same config ranks by ALAS's own priority again.
+    assert not hasattr(runner.config, '_sidecar_task_order')
+    runner.config.get_next_task()
+    assert [t.command for t in runner.config.pending_task] == ['Commission', 'Dorm']
+
+
+def test_task_due_mid_run_preempts_after_reprioritized_selection(profile):
+    """task_switched() runs while the picked task does; a stale sidecar order kept it from switching."""
+    runner, path = profile(task='Dorm')
+    config = runner.config
+    runner._apply_directive({'action': 'reprioritize', 'task_order': ['Dorm']})
+    picked = config.get_next()
+    assert picked.command == 'Dorm'
+    config.task = picked
+    config.bind(picked)
+    # Commission, which ALAS ranks above Dorm, comes due while Dorm runs.
+    data = json.loads(path.read_text())
+    data['Commission']['Scheduler']['NextRun'] = str(NOW - timedelta(minutes=1))
+    path.write_text(json.dumps(data))
+    assert config.task_switched() is True
+    assert [t.command for t in config.pending_task] == ['Commission', 'Dorm']
+
+
 def test_disabled_research_never_selected_while_ready_tasks_progress(profile):
     runner, _ = profile(enabled=False, extra={
         'Commission': {'Enable': True, 'NextRun': str(NOW - timedelta(minutes=1))},

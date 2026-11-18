@@ -89,6 +89,7 @@ class AzurLaneAutoScript:
             for name in task_order:
                 if isinstance(name, str) and name in ready and name not in order:
                     order.append(name)
+            # One-shot: config.get_next_task() takes it at the next selection.
             self.config._sidecar_task_order = tuple(order)
             logger.info(f'AI sidecar: ready task priority {order}; NextRun unchanged')
         elif action == 'skip':
