@@ -142,6 +142,17 @@ class AzurLaneAutoScript:
             logger.warning(f'AI sidecar: pausing automation — {reason}')
             logger.warning('AI sidecar: current scheduler run will stop; press Start in the GUI to resume')
             self._ai_pause = True
+            # The loop ends quietly on a pause, so alert like the crash paths
+            # in run() do. The flag is already set: a notifier that fails
+            # must not keep the pause from taking effect.
+            try:
+                handle_notify(
+                    self.config.Error_OnePushConfig,
+                    title=f"Alas <{self.config_name}> paused",
+                    content=f"<{self.config_name}> AI sidecar pause\n{reason}",
+                )
+            except Exception as e:
+                logger.warning(f'AI sidecar: pause notification failed: {type(e).__name__}: {e}')
 
     @cached_property
     def config(self):
