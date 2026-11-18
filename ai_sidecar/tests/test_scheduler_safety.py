@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 import alas
@@ -230,8 +231,11 @@ def test_real_stuck_handler_defers_confirmed_skip_without_restart(profile, error
     runner._sidecar.notify.return_value = {'action': 'skip', 'delay_minutes': delay}
     runner.save_error_log = lambda: None
     runner.research = MagicMock(side_effect=error('locked research'))
+    # The locked Technology menu is a page ALAS recognises (page_reshmenu).
+    runner._recognised_page = MagicMock(return_value='page_reshmenu')
     runner.config.task_call = MagicMock()
     assert runner.run('research', skip_first_screenshot=True) is False
+    runner._recognised_page.assert_called_once_with()
     runner.config.task_call.assert_not_called()
     runner.device.sleep.assert_not_called()
     assert runner._task_deferred
@@ -286,6 +290,7 @@ def test_deferred_flag_does_not_suppress_next_run_recovery(profile):
     runner._sidecar.notify.side_effect = [{'action': 'skip', 'delay_minutes': 90}, None]
     runner.save_error_log = lambda: None
     runner.research = MagicMock(side_effect=GameTooManyClickError('locked research'))
+    runner._recognised_page = MagicMock(return_value='page_reshmenu')
     runner.config.task_call = MagicMock()
     assert runner.run('research') is False
     assert runner._task_deferred
@@ -293,6 +298,158 @@ def test_deferred_flag_does_not_suppress_next_run_recovery(profile):
     assert not runner._task_deferred
     runner.config.task_call.assert_called_once_with('Restart')
     runner.device.sleep.assert_called_once_with(10)
+
+
+def _page_runner(monkeypatch):
+    """A runner whose page check reads ALAS's real page assets; fake config and device, nothing written."""
+    import module.config.server as server
+    from module.base.base import ModuleBase
+    # Assets are loaded by a path relative to the repository root; read only.
+    monkeypatch.chdir(ROOT)
+    # UI() would otherwise start ALAS's background OCR import.
+    monkeypatch.setattr(ModuleBase, 'EARLY_OCR_IMPORT', True)
+    runner = AzurLaneAutoScript('fake_page')
+    config = MagicMock()
+    config.SERVER = server.server
+    runner.__dict__['config'] = config
+    device = MagicMock()
+    runner.__dict__['device'] = device
+    return runner, device
+
+
+def _page_frame(name):
+    """A 1280x720 frame on which only the check button of that page appears."""
+    from module.base.utils import load_image
+    from module.ui.page import Page
+    return load_image(str(ROOT / Page.all_pages[name].check_button.file))
+
+
+@pytest.mark.parametrize('name', ['page_reshmenu', 'page_main', 'page_reward', 'page_research'])
+def test_page_check_recognises_alas_pages_on_a_fresh_frame_without_input(monkeypatch, name):
+    runner, device = _page_runner(monkeypatch)
+    # The stored frame is stale; only the fresh screenshot shows the page.
+    device.image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    device.screenshot.side_effect = lambda: setattr(device, 'image', _page_frame(name))
+    assert runner._recognised_page() == name
+    device.screenshot.assert_called_once_with()
+    # A screenshot and ALAS's own stuck bookkeeping, nothing that touches the game.
+    assert {call[0] for call in device.method_calls} == {'screenshot', 'stuck_record_add'}
+
+
+def test_page_check_finds_no_page_on_a_screen_alas_does_not_know(monkeypatch):
+    runner, device = _page_runner(monkeypatch)
+    frame = np.random.RandomState(0).randint(0, 255, (720, 1280, 3)).astype(np.uint8)
+    device.screenshot.side_effect = lambda: setattr(device, 'image', frame)
+    assert runner._recognised_page() is None
+    device.screenshot.assert_called_once_with()
+    assert {call[0] for call in device.method_calls} == {'screenshot', 'stuck_record_add'}
+
+
+@pytest.mark.parametrize('failure', [GameStuckError('Wait too long'), OSError('adb gone')])
+def test_page_check_never_raises(monkeypatch, failure):
+    runner, device = _page_runner(monkeypatch)
+    device.screenshot.side_effect = failure
+    warning = MagicMock()
+    monkeypatch.setattr(alas.logger, 'warning', warning)
+    assert runner._recognised_page() is None
+    assert any('page check failed' in str(call[0][0]) for call in warning.call_args_list)
+
+
+@pytest.mark.parametrize('error', [GameStuckError, GameTooManyClickError])
+def test_confirmed_skip_on_unrecognised_screen_still_schedules_restart(profile, monkeypatch, error):
+    """The task stays deferred, but the next task could not navigate from this screen."""
+    runner, _ = profile()
+    runner.__dict__['device'] = MagicMock()
+    runner._sidecar = MagicMock()
+    runner._sidecar.notify.return_value = {'action': 'skip', 'delay_minutes': 90}
+    runner.save_error_log = lambda: None
+    runner.research = MagicMock(side_effect=error('stuck on an unknown screen'))
+    runner._recognised_page = MagicMock(return_value=None)
+    warning = MagicMock()
+    monkeypatch.setattr(alas.logger, 'warning', warning)
+    assert runner.run('research', skip_first_screenshot=True) is False
+    assert runner._task_deferred
+    runner.device.sleep.assert_called_once_with(10)
+    assert any('deferred' in str(call[0][0]) and 'scheduling Restart' in str(call[0][0])
+               for call in warning.call_args_list)
+    reloaded = AzurLaneConfig('regression')
+    assert deep_get(reloaded.data, 'Research.Scheduler.NextRun') == NOW + timedelta(minutes=90)
+    assert deep_get(reloaded.data, 'Restart.Scheduler.NextRun') == NOW
+    assert reloaded.is_task_enabled('Restart')
+    assert reloaded.get_next().command == 'Restart'
+
+
+def test_confirmed_skip_on_recognised_page_logs_why_there_is_no_restart(profile, monkeypatch):
+    runner, _ = profile()
+    runner.__dict__['device'] = MagicMock()
+    runner._sidecar = MagicMock()
+    runner._sidecar.notify.return_value = {'action': 'skip', 'delay_minutes': 90}
+    runner.save_error_log = lambda: None
+    runner.research = MagicMock(side_effect=GameTooManyClickError('locked research'))
+    runner._recognised_page = MagicMock(return_value='page_reshmenu')
+    runner.config.task_call = MagicMock()
+    info = MagicMock()
+    monkeypatch.setattr(alas.logger, 'info', info)
+    assert runner.run('research', skip_first_screenshot=True) is False
+    assert runner._task_deferred
+    runner.config.task_call.assert_not_called()
+    assert any('deferred on page_reshmenu' in str(call[0][0]) for call in info.call_args_list)
+
+
+def test_failed_page_check_falls_back_to_restart(profile):
+    """With a device that cannot give a frame the real page check fails; that must mean Restart."""
+    runner, _ = profile()
+    runner.__dict__['device'] = MagicMock()
+    runner.device.screenshot.side_effect = OSError('adb gone')
+    runner._sidecar = MagicMock()
+    runner._sidecar.notify.return_value = {'action': 'skip', 'delay_minutes': 90}
+    runner.save_error_log = lambda: None
+    runner.research = MagicMock(side_effect=GameTooManyClickError('stuck'))
+    runner.config.task_call = MagicMock()
+    assert runner.run('research', skip_first_screenshot=True) is False
+    assert runner._task_deferred
+    runner.config.task_call.assert_called_once_with('Restart')
+    runner.device.sleep.assert_called_once_with(10)
+    assert deep_get(AzurLaneConfig('regression').data, 'Research.Scheduler.NextRun') == NOW + timedelta(minutes=90)
+
+
+def test_scheduler_runs_restart_after_deferral_on_unrecognised_screen(profile, monkeypatch):
+    """Loop level: the deferred task costs no failure and no task_failed; Restart is what runs next."""
+    runner, _ = profile()
+    runner.config.override(AiSidecar_Enabled=True)
+    runner.__dict__['device'] = MagicMock()
+    checker = MagicMock()
+    checker.is_recovered.return_value = False
+    runner.__dict__['checker'] = checker
+    runner.stop_event = threading.Event()
+    runner.save_error_log = lambda: None
+    runner._recognised_page = MagicMock(return_value=None)
+    runner.research = MagicMock(side_effect=GameTooManyClickError('stuck on an unknown screen'))
+    runner.restart = MagicMock(side_effect=runner.stop_event.set)
+    selected = []
+
+    def next_task():
+        # Without a Restart the stuck task would be selected again, forever.
+        assert len(selected) < 2, 'scheduler kept selecting after %s' % selected
+        # ALAS's own selection from the saved profile, without its wait loop.
+        task = runner.config.get_next().command
+        runner.config.init_task(task)
+        selected.append(task)
+        return task
+    runner.get_next_task = next_task
+    client = MagicMock()
+    client.notify.side_effect = lambda event, payload: {'action': 'skip', 'delay_minutes': 90} if event == 'unknown_state' else None
+    monkeypatch.setattr(alas, 'AISidecarClient', lambda _: client)
+    monkeypatch.setattr(alas.logger, 'set_file_logger', lambda _: None)
+    runner.loop()
+    assert selected == ['Research', 'Restart']
+    runner.research.assert_called_once()
+    runner.restart.assert_called_once()
+    assert runner.failure_record.get('Research', 0) == 0
+    results = [(call.args[0], call.args[1]['task']) for call in client.notify.call_args_list
+               if call.args[0] in ('task_complete', 'task_failed')]
+    assert results == [('task_complete', 'Restart')]
+    assert deep_get(AzurLaneConfig('regression').data, 'Research.Scheduler.NextRun') == NOW + timedelta(minutes=90)
 
 
 def test_scheduler_proceeds_after_deferred_task_without_result_or_failure(profile, monkeypatch):
@@ -306,6 +463,7 @@ def test_scheduler_proceeds_after_deferred_task_without_result_or_failure(profil
     runner.failure_record['Research'] = 2
     runner.save_error_log = lambda: None
     runner.research = MagicMock(side_effect=GameTooManyClickError('locked research'))
+    runner._recognised_page = MagicMock(return_value='page_reshmenu')
     runner.dorm = MagicMock(side_effect=runner.stop_event.set)
     tasks = iter(['Research', 'Dorm'])
     def next_task():

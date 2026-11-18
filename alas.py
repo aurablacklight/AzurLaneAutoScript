@@ -221,7 +221,14 @@ class AzurLaneAutoScript:
                     })
                     if self._apply_directive(directive, task=task_name) is True:
                         self._task_deferred = True
-                        return False
+                        # The task stays deferred either way. Whether the game
+                        # also needs a restart depends on the screen it is on.
+                        page = self._recognised_page()
+                        if page is not None:
+                            logger.info(f'AI sidecar: `{task_name}` deferred on {page}, no restart needed')
+                            return False
+                        logger.warning(f'AI sidecar: `{task_name}` deferred, but the game is not on a page '
+                                       f'Alas recognises; scheduling Restart')
                 except Exception:
                     pass  # sidecar errors must never break ALAS
             logger.warning(f'Game stuck, {self.device.package} will be restarted in 10 seconds')
@@ -278,6 +285,39 @@ class AzurLaneAutoScript:
                 content=f"<{self.config_name}> Exception occured",
             )
             exit(1)
+
+    def _recognised_page(self):
+        """
+        The page the game is on, if it is one Alas can navigate from.
+
+        Asked after a confirmed skip of a stuck task. On a recognised page the
+        next task finds its own way, so the game is left alone. On any other
+        screen the next task would end in GamePageUnknownError, which stops
+        Alas, so the caller schedules Restart.
+
+        Takes a fresh screenshot and runs only the page check buttons of
+        module/ui/page.py over it, as `UI.ui_get_current_page()` does for
+        known pages. Unlike that method it does not tap GOTO_MAIN, does not
+        handle popups and does not raise.
+
+        Returns:
+            str | None: Page name such as `page_reshmenu`. None when no page
+                check button appears or the check itself failed; never raises.
+        """
+        try:
+            from module.ui.page import Page
+            from module.ui.ui import UI
+            ui = UI(self.config, device=self.device)
+            self.device.screenshot()
+            for page in Page.iter_pages():
+                if page.check_button is None:
+                    continue
+                if ui.ui_page_appear(page=page):
+                    return page.name
+            return None
+        except Exception as e:
+            logger.warning(f'AI sidecar: page check failed: {type(e).__name__}: {e}')
+            return None
 
     def _last_screenshot_base64(self):
         """
