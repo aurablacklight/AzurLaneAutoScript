@@ -7,6 +7,8 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "module", "ai_hook"))
+# The hook logs through ALAS's logger, which it takes by name ('alas') without importing module.logger.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import base64
 import time
@@ -15,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+import hook
 from hook import AISidecarClient
 
 
@@ -195,3 +198,80 @@ def test_environment_url_wins_over_config(monkeypatch):
         client.notify('heartbeat', {})
 
     assert mock_post.call_args[0][0] == 'http://sidecar:8484/api/events'
+
+
+# ---------------------------------------------------------------------------
+# Logging: failures must reach ALAS's log, and say what they are
+# ---------------------------------------------------------------------------
+
+def _warnings(mock_warning):
+    """Each warning as the text ALAS would log."""
+    return [str(call[0][0]) % call[0][1:] if call[0][1:] else str(call[0][0])
+            for call in mock_warning.call_args_list]
+
+
+def test_hook_logs_through_the_alas_logger():
+    """logging.getLogger(__name__) has no handler in ALAS; the warnings never reached its log file."""
+    from module.logger import logger as alas_logger
+    assert hook.logger is alas_logger
+
+
+def test_unreachable_sidecar_is_logged_to_the_alas_logger():
+    import requests as req_module
+    from module.logger import logger as alas_logger
+    client = AISidecarClient(MockConfig())
+
+    with patch.object(alas_logger, 'warning') as warning, \
+            patch('hook.requests.post', side_effect=req_module.exceptions.ConnectionError('refused')):
+        result = client.notify('unknown_state', {})
+
+    assert result is None
+    assert _warnings(warning) == ['Sidecar unreachable for event unknown_state: refused']
+
+
+def test_non_200_status_is_logged_to_the_alas_logger():
+    from module.logger import logger as alas_logger
+    client = AISidecarClient(MockConfig())
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+
+    with patch.object(alas_logger, 'warning') as warning, \
+            patch('hook.requests.post', return_value=mock_response):
+        result = client.notify('task_failed', {})
+
+    assert result is None
+    assert _warnings(warning) == ['Sidecar returned status 500 for event task_failed']
+
+
+def test_non_json_200_body_is_reported_as_what_it_is():
+    """The sidecar answered, so it is not unreachable; its body is not a directive."""
+    client = AISidecarClient(MockConfig())
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.side_effect = ValueError('Expecting value: line 1 column 1 (char 0)')
+
+    with patch.object(hook.logger, 'warning') as warning, \
+            patch('hook.requests.post', return_value=mock_response):
+        result = client.notify('cycle_start', {})
+
+    assert result is None
+    logged = _warnings(warning)
+    assert len(logged) == 1
+    assert 'unreachable' not in logged[0]
+    assert 'non-JSON body' in logged[0]
+    assert 'cycle_start' in logged[0]
+    assert 'Expecting value' in logged[0]
+
+
+def test_notify_never_raises_whatever_the_response_does():
+    client = AISidecarClient(MockConfig())
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.side_effect = RuntimeError('broken response object')
+
+    with patch.object(hook.logger, 'warning') as warning, \
+            patch('hook.requests.post', return_value=mock_response):
+        result = client.notify('heartbeat', {})
+
+    assert result is None
+    assert len(_warnings(warning)) == 1

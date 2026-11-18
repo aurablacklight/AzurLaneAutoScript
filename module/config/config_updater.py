@@ -523,7 +523,8 @@ class ConfigGenerator:
     def generate_deploy_template():
         template = poor_yaml_read(DEPLOY_TEMPLATE)
         cn = {
-            'Repository': 'git://git.lyoko.io/AzurLaneAutoScript',
+            # No 'Repository' here: upstream's CN mirror (git://git.lyoko.io/AzurLaneAutoScript)
+            # carries upstream, not this fork, so the CN templates keep the fork's URL.
             'PypiMirror': 'https://mirrors.aliyun.com/pypi/simple',
             'Language': 'zh-CN',
         }

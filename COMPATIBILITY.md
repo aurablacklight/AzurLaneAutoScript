@@ -63,9 +63,9 @@ service waits for it.
 Port 8484 is published on the host's loopback only (`127.0.0.1:8484:8484`), because the
 sidecar has no authentication. The `alas` container does not use the published port.
 
-The Python sidecar in `./ai_sidecar` is no longer part of `docker-compose.yml`. It has no
-`/ocr/recognize`. The directory stays in the tree: its `tests/` hold the device-free tests
-of this fork.
+The Python sidecar that used to live in `./ai_sidecar` is gone: nothing ran it after the Rust
+sidecar replaced it, and it had no `/ocr/recognize`. The directory stays for its `tests/`,
+which hold the device-free tests of this fork.
 
 ## How ALAS reaches the sidecar
 
@@ -129,4 +129,4 @@ file.
 - `config/deploy.template-docker.yaml` -- deploy config for Docker Compose
 - `module/ocr/rpc.py` -- HTTP OCR client
 - `module/ai_hook/hook.py` -- AI hook client
-- `ai_sidecar/` -- the earlier Python sidecar and the device-free tests
+- `ai_sidecar/tests/` -- the device-free tests

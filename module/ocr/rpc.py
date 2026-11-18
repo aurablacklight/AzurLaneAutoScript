@@ -24,10 +24,31 @@ def _encode_image(img_fp):
 class ModelProxy:
     base_url = None
     timeout = 10  # seconds, slightly higher than old ZeroRPC 5s to account for model cold-load
+    connect_timeout = 3  # seconds to open the connection, same as the health check
     # Keep in step with MAX_OCR_BATCH in the sidecar (crates/gacha-server/src/ocr_common.rs).
-    # Oversized batches are split client-side, so a stale value here costs a round trip, not a crash.
+    # Larger batches are split client-side into chunks of this size. If the sidecar's limit
+    # grows, a stale value here only costs extra round trips. If the sidecar's limit is lower
+    # than this, it answers 400 to every chunk above its limit and the request raises.
     max_batch = 16
-    retries = 3  # attempts for transport errors and 5xx
+    # Seconds to sleep before each retry. One list per kind of failure, each counted on its
+    # own within a request; a request raises once its list is used up.
+    #
+    # Sidecar down or starting (connection refused, reset or not opened in time, HTTP 503):
+    # 8 attempts, 31.5 s of sleeping, so that a sidecar restart is survived. Worst case
+    # before raising:
+    #   HTTP 503                        about 32 s (the answer itself is immediate)
+    #   connection refused              about 32 s; about 48 s against loopback on Windows,
+    #                                   which takes 2 s to report each refusal
+    #   connection not opened in time   55.5 s (8 x connect_timeout + 31.5 s)
+    outage_delays = (0.5, 1, 2, 4, 8, 8, 8)
+    # Sidecar reachable but failing (read timeout, 5xx other than 503, anything else):
+    # 3 attempts, as before. Worst case for a read timeout is 30.6 s (3 x timeout + 0.6 s);
+    # it does not get the long list because every attempt already waits `timeout`.
+    # A request that meets both kinds of failure can draw on both lists; that stays under
+    # the two worst cases added together (86 s).
+    retry_delays = (0.2, 0.4)
+    # A whitelisted reading under this confidence is logged, not rejected; see `_result_texts`.
+    low_confidence = 0.5
 
     @classmethod
     def init(cls, address="127.0.0.1:8484"):
@@ -36,7 +57,17 @@ class ModelProxy:
         try:
             resp = requests.get('http://%s/health' % address, timeout=3)
             resp.raise_for_status()
-            logger.info('Successfully connected to OCR server (HTTP)')
+            try:
+                ocr_available = resp.json().get('ocr_available')
+            except Exception:
+                # Not the sidecar's health body; nothing to judge by.
+                ocr_available = None
+            if ocr_available is False:
+                logger.warning('OCR server is running but reports that OCR is not available '
+                               '(health: ocr_available=false). OCR requests will fail with '
+                               'HTTP 503 until it is; check the sidecar log and its models')
+            else:
+                logger.info('Successfully connected to OCR server (HTTP)')
         except Exception as e:
             # Not fatal and deliberately not latched: the server may simply be slow to
             # start. Requests retry on their own, and there is no local OCR fallback.
@@ -56,8 +87,9 @@ class ModelProxy:
     def _post(self, body):
         """Send a POST to the OCR endpoint and return parsed JSON.
 
-        Transport errors and 5xx are retried; 4xx is raised immediately because it
-        means this client built a bad request and retrying cannot help.
+        Transport errors and 5xx are retried, see `outage_delays` and `retry_delays`
+        for how long. 4xx is raised immediately because the same request would get
+        the same answer.
 
         Args:
             body (dict): JSON request body.
@@ -68,37 +100,88 @@ class ModelProxy:
         Raises:
             Exception: On a 4xx, or after the final retry.
         """
-        last_error = None
-        for attempt in range(1, ModelProxy.retries + 1):
+        outage_failures = 0
+        other_failures = 0
+        while 1:
+            outage = False
             try:
-                resp = requests.post(ModelProxy.base_url, json=body, timeout=ModelProxy.timeout)
+                resp = requests.post(ModelProxy.base_url, json=body,
+                                     timeout=(ModelProxy.connect_timeout, ModelProxy.timeout))
+            except requests.exceptions.ConnectionError as e:
+                # Refused, reset, or not opened in time: the sidecar is down or starting.
+                # A read timeout is not a ConnectionError and takes the branch below.
+                error = e
+                outage = True
             except Exception as e:
-                last_error = e
-                if attempt < ModelProxy.retries:
-                    logger.warning('OCR request failed (%s: %s), retry %s/%s'
-                                   % (type(e).__name__, e, attempt, ModelProxy.retries))
-                    time.sleep(0.2 * attempt)
-                    continue
-                raise
+                error = e
+            else:
+                if resp.status_code == 422:
+                    # The sidecar's own failure, not a malformed request: it answers
+                    # 422 `recognition_failed` when recognition errors out.
+                    raise RuntimeError(
+                        'OCR server failed to process the request (HTTP 422). This is a '
+                        'server-side failure: it could not decode an image, does not know '
+                        'the model name, or its model files are missing; the cause is in '
+                        'the sidecar log. Server said: %s' % resp.text[:300])
+                if 400 <= resp.status_code < 500:
+                    # The request itself is wrong. Surface the server's explanation
+                    # rather than a misleading downstream error.
+                    raise RuntimeError('OCR server rejected request (HTTP %s): %s'
+                                       % (resp.status_code, resp.text[:300]))
+                if resp.status_code < 500:
+                    return resp.json()
+                error = RuntimeError('OCR server error (HTTP %s): %s'
+                                     % (resp.status_code, resp.text[:300]))
+                # 503 `ocr_unavailable`: the sidecar is up but its OCR engine is not.
+                outage = resp.status_code == 503
 
-            if 400 <= resp.status_code < 500:
-                # Client-side bug. Surface the server's explanation rather than a
-                # misleading downstream error.
-                raise RuntimeError('OCR server rejected request (HTTP %s): %s'
-                                   % (resp.status_code, resp.text[:300]))
+            if outage:
+                delays, failures = ModelProxy.outage_delays, outage_failures
+                outage_failures += 1
+            else:
+                delays, failures = ModelProxy.retry_delays, other_failures
+                other_failures += 1
+            if failures >= len(delays):
+                raise error
+            logger.warning('OCR request failed (%s: %s), retry %s/%s in %ss'
+                           % (type(error).__name__, error, failures + 1, len(delays),
+                              delays[failures]))
+            time.sleep(delays[failures])
 
-            if resp.status_code >= 500:
-                last_error = RuntimeError('OCR server error (HTTP %s): %s'
-                                          % (resp.status_code, resp.text[:300]))
-                if attempt < ModelProxy.retries:
-                    logger.warning('OCR server 5xx, retry %s/%s' % (attempt, ModelProxy.retries))
-                    time.sleep(0.2 * attempt)
-                    continue
-                raise last_error
+    @staticmethod
+    def _result_texts(data, expected, cand_alphabet=None):
+        """Take the text of each result, refusing a response of the wrong length.
 
-            return resp.json()
+        Results are matched to images by position, so a missing or extra result
+        would put every later reading on the wrong item.
 
-        raise last_error
+        A whitelisted reading (a number, a counter, a timer) that the sidecar is
+        unsure of is logged and returned unchanged. The sidecar's `confidence` is
+        one mean softmax probability per string. On real EN crops the wrong oil
+        readings all sat under 0.5 and so did 2 of 178 correct readings; other
+        digit fields are unmeasured, so nothing is rejected on it yet.
+
+        Args:
+            data (dict): Parsed JSON response.
+            expected (int): Number of images that were sent.
+            cand_alphabet (str): The whitelist the request carried, if any.
+
+        Returns:
+            list[str]:
+        """
+        results = data["results"]
+        if len(results) != expected:
+            raise RuntimeError('OCR server returned %s results for %s images'
+                               % (len(results), expected))
+        texts = [r["text"] for r in results]
+        if cand_alphabet is not None:
+            for r in results:
+                confidence = r.get("confidence") if isinstance(r, dict) else None
+                if r["text"] and isinstance(confidence, (int, float)) \
+                        and not isinstance(confidence, bool) \
+                        and confidence < ModelProxy.low_confidence:
+                    logger.warning('OCR low confidence %.2f for %r' % (confidence, r["text"]))
+        return texts
 
     def _post_batch(self, img_list, cand_alphabet=None):
         """OCR a list of images, splitting oversized batches.
@@ -127,7 +210,7 @@ class ModelProxy:
             if cand_alphabet is not None:
                 body["cand_alphabet"] = cand_alphabet
             data = self._post(body)
-            results.extend([r["text"] for r in data["results"]])
+            results.extend(self._result_texts(data, len(chunk), cand_alphabet))
         return results
 
     def _post_single(self, img_fp, cand_alphabet=None):
@@ -144,7 +227,7 @@ class ModelProxy:
         if cand_alphabet is not None:
             body["cand_alphabet"] = cand_alphabet
         data = self._post(body)
-        return data["results"][0]["text"]
+        return self._result_texts(data, 1, cand_alphabet)[0]
 
     def ocr(self, img_fp):
         """

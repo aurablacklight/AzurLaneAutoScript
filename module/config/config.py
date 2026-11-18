@@ -224,11 +224,15 @@ class AzurLaneConfig(ConfigUpdater, ManualConfig, GeneratedConfig, ConfigWatcher
 
         f = Filter(regex=r"(.*)", attr=["command"])
         f.load(self.SCHEDULER_PRIORITY)
+        # Sidecar priority applies to one selection: take it here, so that
+        # later selections, such as task_switched() while the picked task
+        # runs, rank by SCHEDULER_PRIORITY again and a task that comes due
+        # can pre-empt.
+        order = self.__dict__.pop('_sidecar_task_order', ())
         if pending:
             pending = f.apply(pending)
-            # Sidecar priority is transient and applies only to eligible tasks.
+            # Sidecar priority applies only to eligible tasks.
             # NextRun remains the eligibility deadline, never an ordering key.
-            order = getattr(self, '_sidecar_task_order', ())
             rank = {name: i for i, name in enumerate(order)}
             pending.sort(key=lambda task: (
                 -1 if task.command == 'Restart' else rank.get(task.command, len(rank))

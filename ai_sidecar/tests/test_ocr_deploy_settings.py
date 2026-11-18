@@ -66,6 +66,39 @@ def test_template_agrees_with_class_defaults(relative, model):
     assert data['OcrClientAddress'] == model.OcrClientAddress
 
 
+# ---------------------------------------------------------------------------
+# No shipped template updates the fork away
+# ---------------------------------------------------------------------------
+# With AutoUpdate on, deploy/git.py points `origin` at Repository and runs
+# `git reset --hard origin/<Branch>`. Upstream's URL there replaces the fork's code.
+
+FORK_REPOSITORY = 'https://github.com/aurablacklight/AzurLaneAutoScript'
+FORK_BRANCH = 'recover/ai-hook-2026-07-16'
+UPSTREAM_MARKERS = ('LmeSzinc', 'git.lyoko.io')
+
+
+@pytest.mark.parametrize('relative, model', [
+    ('deploy/template', deploy_config.ConfigModel),
+    ('deploy/Windows/template.yaml', windows_config.ConfigModel),
+] + [('config/' + name, deploy_config.ConfigModel) for name in CONFIG_TEMPLATES])
+def test_no_template_updates_automatically(relative, model):
+    assert model.AutoUpdate is False
+    assert read_template(relative)['AutoUpdate'] is False
+
+
+@pytest.mark.parametrize('relative', ['deploy/template'] + ['config/' + name for name in CONFIG_TEMPLATES])
+def test_templates_name_the_fork_not_upstream(relative):
+    data = read_template(relative)
+    assert data['Repository'] == FORK_REPOSITORY
+    assert data['Branch'] == FORK_BRANCH
+    assert not any(marker in str(data['Repository']) for marker in UPSTREAM_MARKERS)
+
+
+def test_class_default_names_the_fork():
+    assert deploy_config.ConfigModel.Repository == FORK_REPOSITORY
+    assert deploy_config.ConfigModel.Branch == FORK_BRANCH
+
+
 @pytest.mark.parametrize('name', DOCKER_TEMPLATES)
 def test_docker_template_names_the_compose_sidecar(name, compose):
     """Inside the alas container 127.0.0.1 is the container itself, so the service is named."""

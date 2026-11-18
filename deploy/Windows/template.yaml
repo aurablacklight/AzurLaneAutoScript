@@ -20,9 +20,9 @@ Deploy:
     # [In most cases] Use true
     # [Other] Use false to when connected to an untrusted network
     SSLVerify: true
-    # Update Alas at startup
-    # [In most cases] Use true
-    AutoUpdate: true
+    # Update Alas at startup, with `git reset --hard` to Repository/Branch
+    # [This fork] Use false. An update replaces the fork's code with the repository named above
+    AutoUpdate: false
 
   Python:
     # Filepath of python executable `python.exe`
