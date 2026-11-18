@@ -1,5 +1,11 @@
 **| [English](README_en.md) | 简体中文 | [日本語](README_jp.md) |**
 
+> **This is a fork.** It adds an AI hook in the scheduler and sends OCR to a separate server, the
+> Rust sidecar [rust-gacha-ocr-sidecar](https://github.com/aurablacklight/rust-gacha-ocr-sidecar),
+> so by default it needs that server running. The branch it runs is `recover/ai-hook-2026-07-16`.
+> What differs from upstream, and how to set it up, is in [COMPATIBILITY.md](COMPATIBILITY.md).
+> The rest of this page is upstream's README, unchanged.
+
 # AzurLaneAutoScript
 
 #### Discord [![](https://img.shields.io/discord/720789890354249748?logo=discord&logoColor=ffffff&color=4e4c97)](https://discord.gg/AQN6GeJ) QQ群  ![](https://img.shields.io/badge/QQ%20Group-1087735381-4e4c97)

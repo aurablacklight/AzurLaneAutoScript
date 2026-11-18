@@ -42,7 +42,8 @@ services:
       # The server reads /app/config.toml. server.host must be "0.0.0.0" in it,
       # the server's own default 127.0.0.1 cannot be reached from the alas container.
       - '${GACHA_SERVER_CONFIG:-./deploy/docker/gacha-server.toml}:/app/config.toml:ro'
-      # PaddleOCR models. Without them the server starts, but every OCR call answers 503.
+      # PaddleOCR models. Without the files the server starts and reports itself healthy, but
+      # every OCR call answers 422 (503 only if this directory does not exist in the container).
       - '${GACHA_OCR_MODELS:-./models/ocr}:/app/models/ocr:ro'
       # Decision history
       - sidecar-state:/app/state

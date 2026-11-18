@@ -1,4 +1,11 @@
-# Multi-Architecture Docker Compatibility
+# This fork: the sidecar, Docker, and what differs from upstream
+
+This is a fork of [LmeSzinc/AzurLaneAutoScript](https://github.com/LmeSzinc/AzurLaneAutoScript).
+The branch it runs is `recover/ai-hook-2026-07-16`, which is also the repository's default
+branch; `master` is an older state and is not maintained. The fork adds an AI hook in the
+scheduler and sends OCR to a separate server, the Rust sidecar `gacha-server`. The first half of
+this page is the Docker setup; [What the fork changes in ALAS](#what-the-fork-changes-in-alas)
+describes the behaviour.
 
 ## Containers
 
@@ -46,8 +53,12 @@ else, so four things have to be in place before `docker compose up`:
    models/ocr/english/rec.onnx, dict.txt
    ```
 
-   Without the models the server still starts and is healthy, `GET /health` reports
-   `ocr_available: false`, and every OCR call answers 503.
+   Without the model files the server still starts and is healthy. Docker creates the
+   mounted directory if it is missing, so the server sees a models directory, `GET /health`
+   reports `ocr_available: true`, and every OCR call answers 422 `recognition_failed`; ALAS
+   then stops on its first reading with "OCR server failed to process the request". Only a
+   server whose models directory does not exist at all reports `ocr_available: false` and
+   answers 503.
 4. **Sidecar config.** `deploy/docker/gacha-server.toml` is mounted read-only at
    `/app/config.toml`. It sets `server.host = "0.0.0.0"`, which the container needs: the
    server's default `127.0.0.1` is the sidecar container's own loopback and the `alas`
@@ -93,8 +104,8 @@ Inside the `alas` container `127.0.0.1` is the container itself, so both have to
 - `false` -- every ALAS instance loads cnocr and mxnet in-process, which only works where
   both are installed (x86 only). The `alas` image has no mxnet.
 
-There is no local fallback. If the server is unreachable or answers with a 5xx, the request
-is tried 3 times and then raises; a 4xx raises immediately.
+There is no local fallback. What the OCR client does when a request fails is under
+[OCR](#ocr) below.
 
 Outside Docker Compose:
 
@@ -117,6 +128,83 @@ with its `ocr` compose service, `deploy/docker/Dockerfile.ocr`, and the deploy s
 in an existing `config/deploy.yaml` are ignored and disappear the next time ALAS writes the
 file.
 
+## What the fork changes in ALAS
+
+### The AI hook
+
+`alas.py` reports four events to the sidecar (`POST /api/events`, through
+`module/ai_hook/hook.py`) and applies the directive that comes back.
+
+| Event | When | What is sent |
+|---|---|---|
+| `cycle_start` | Each pass of the scheduler loop, after the next task is chosen; at most once in 60 seconds | A fresh screenshot and the pending and waiting task lists |
+| `unknown_state` | A task ends in `GameStuckError` or `GameTooManyClickError` | The last frame the task saw, the click history, the task, the error, the task's failure count |
+| `task_failed` | A task returns failure and was not deferred | The same stored frame, the task, the failure count |
+| `task_complete` | A task returns success | The task and its duration; the answer is not used |
+
+| Directive | What ALAS does |
+|---|---|
+| `continue`, anything unknown, no answer | Nothing. ALAS goes on as upstream would |
+| `skip` | Defers the task: sets its `NextRun` to now plus the requested delay, kept between 15 minutes and one minute under the task's own interval ceiling, and checks the value was saved. The task is never disabled. After a skip on `unknown_state` the game is restarted only if the screen is not a page ALAS recognises; on a recognised page the next task simply starts |
+| `reprioritize` | Only at `cycle_start`. Ranks the tasks that are already due in the order given, for that one selection. `NextRun` is not changed, and once a task is picked ALAS's own priority applies again, so a higher-priority task can still pre-empt it |
+| `pause` | At `cycle_start`: ends this scheduler run and sends the push notification. On a task event it is ignored until the task has failed twice in a row |
+
+The hook never stops ALAS: if the sidecar is down, slow or answers nonsense, the event is
+dropped, a warning goes to the ALAS log, and ALAS carries on. One event waits at most 5 seconds
+to connect and 30 seconds for an answer.
+
+The hook is on by default and has no switch in the GUI. `AiSidecar_Enabled` and
+`AiSidecar_SidecarUrl` exist only in `module/config/config_generated.py`, kept there by hand:
+running ALAS's config generator removes them, which turns the hook off without a message. The
+environment variable `AI_SIDECAR_URL` overrides the URL.
+
+Known gaps, left as they are:
+
+- A deferral does not count as a failure, so a task that sticks every time can be deferred again
+  and again with only an info line in the log. One stuck task is also reported twice, as
+  `unknown_state` and then `task_failed`.
+- When the next task is more than two hours away, ALAS closes the game for the wait whatever
+  `WhenTaskQueueEmpty` says. Unless that setting is `close_game`, it then starts the waited task
+  before the Restart it scheduled, so that task fails once with the game not running.
+
+### OCR
+
+`module/ocr/rpc.py` sends every reading to the sidecar (`POST /ocr/recognize`).
+
+- **A sidecar that is down or restarting** (connection refused or reset, or HTTP 503) is retried
+  eight times over about 32 seconds, 48 on Windows loopback. A read timeout or another 5xx is
+  tried three times. A 4xx raises at once. When the retries run out the request raises and
+  ALAS stops.
+- **One result per image.** A response with a different number of results raises.
+- **No reading is rejected for low confidence.** A reading with a character whitelist (a number,
+  a counter, a timer) that the sidecar scores under 0.5 is logged as `OCR low confidence` and
+  used as it is.
+- **Oil on EN** is read from an area 8 px wider than upstream's. A five-digit amount reaches
+  the edge of upstream's area and loses a digit, which could end a campaign on a false "Reach
+  oil limit".
+- **`cnocr` on the CN server** is served by the sidecar's English model and cannot read Chinese.
+  EN is not affected.
+
+### Updates
+
+`deploy/template` and every `config/deploy.template*.yaml` name this fork and its branch and set
+`AutoUpdate: false`. With `AutoUpdate: true` ALAS runs `git reset --hard` to
+`Repository`/`Branch` at startup and at `AutoRestartTime`; pointed at upstream, that replaces
+the fork's code in the checkout. An existing `config/deploy.yaml` keeps whatever it says: check
+those three settings in it by hand.
+
+### Tests
+
+The device-free tests of everything above are in `ai_sidecar/tests`. They need ALAS's Python
+dependencies and pytest, and run from the repository root:
+
+```
+python -m pytest ai_sidecar/tests
+```
+
+Running them creates `config/deploy.yaml` and `log/` in the working directory; both are
+ignored by git.
+
 ## Files
 
 - `docker-compose.yml` -- the `alas` and `sidecar` services
@@ -129,4 +217,5 @@ file.
 - `config/deploy.template-docker.yaml` -- deploy config for Docker Compose
 - `module/ocr/rpc.py` -- HTTP OCR client
 - `module/ai_hook/hook.py` -- AI hook client
+- `alas.py` -- where the hook's events are raised and its directives applied
 - `ai_sidecar/tests/` -- the device-free tests

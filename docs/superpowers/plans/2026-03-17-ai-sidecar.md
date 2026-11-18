@@ -1,5 +1,13 @@
 # AI Sidecar Implementation Plan
 
+> **Historical, 2026-03-17. This is not how the fork works now.** It plans a Python FastAPI
+> sidecar in `./ai_sidecar`. That sidecar was replaced by the Rust `gacha-server`
+> ([rust-gacha-ocr-sidecar](https://github.com/aurablacklight/rust-gacha-ocr-sidecar)) and removed
+> from this repository on 2026-11-17, and the hook's behaviour has changed since: `skip` delays
+> are clamped, `reprioritize` no longer rewrites `NextRun`, `pause` never touches `stop_event`,
+> and OCR depends on the sidecar. The current description is
+> [COMPATIBILITY.md](../../../COMPATIBILITY.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add an event-driven AI sidecar service that provides intelligent task prioritization for ALAS via any OpenAI-compatible API.
