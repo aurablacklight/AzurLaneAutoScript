@@ -145,7 +145,7 @@ file.
 | Directive | What ALAS does |
 |---|---|
 | `continue`, anything unknown, no answer | Nothing. ALAS goes on as upstream would |
-| `skip` | Defers the task: sets its `NextRun` to now plus the requested delay, kept between 15 minutes and one minute under the task's own interval ceiling, and checks the value was saved. The task is never disabled. After a skip on `unknown_state` the game is restarted only if the screen is not a page ALAS recognises; on a recognised page the next task simply starts |
+| `skip` | Defers the task: sets its `NextRun` to now plus the requested delay, kept between 15 minutes and one minute under the task's own interval ceiling, and checks the value was saved. The task is never disabled. After a skip on `unknown_state` the game is restarted only if the screen is not a page ALAS recognises; on a recognised page the next task simply starts. A skip does not clear the task's failure count: a third failure in a row still ends the scheduler run, as upstream does |
 | `reprioritize` | Only at `cycle_start`. Ranks the tasks that are already due in the order given, for that one selection. `NextRun` is not changed, and once a task is picked ALAS's own priority applies again, so a higher-priority task can still pre-empt it |
 | `pause` | At `cycle_start`: ends this scheduler run and sends the push notification. On a task event it is ignored until the task has failed twice in a row |
 
@@ -202,6 +202,24 @@ Known gaps, left as they are:
   run out, `Research names still invalid:` lists the cards left out of the selection.
 - **`cnocr` on the CN server** is served by the sidecar's English model and cannot read Chinese.
   EN is not affected.
+
+### Starting the game
+
+Since version 9.3.23 the EN client opens with a "Download Game Assets" dialog. Its red X exits
+the game, and ALAS's image of a maintenance notice's close button (`MAINTENANCE_ANNOUNCE`)
+matches that X: upstream taps it, the game closes, and the Restart task fails every time.
+
+- `handle_assets_download` in `module/handler/info_handler.py` looks for the dialog first, in
+  the login loop and in the page check every task starts with, and the X is never tapped.
+- **Nothing to download** ("Download basic assets (0B)"): ALAS taps Confirm, which leads to the
+  title screen, and logs `Download Game Assets dialog with nothing to download (0B), confirm`.
+- **Any other size, or a size that was not read:** ALAS taps nothing, because which assets to
+  download is the player's choice. It logs a warning that says so, waits on the dialog until
+  its own stuck check ends the task, and after three failed restarts the scheduler stops.
+  Choose in the game, then start ALAS again.
+- The two images are `assets/cn/handler/LOGIN_ASSETS_DOWNLOAD*.png`, taken from the EN client.
+  They sit in the `cn` folder because ALAS generates a button only from a file there; the
+  dialog was not seen on the other servers, where the text differs and nothing will match.
 
 ### Updates
 

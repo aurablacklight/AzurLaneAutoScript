@@ -146,6 +146,41 @@ class InfoHandler(ModuleBase):
             POPUP_CANCEL_WHITE, POPUP_CONFIRM_WHITE,
         ])
 
+    def handle_assets_download(self):
+        """
+        The "Download Game Assets" dialog the EN client shows when it starts, since 9.3.23.
+
+        Its red X matches MAINTENANCE_ANNOUNCE and exits the game, so a caller that gets True
+        must not look at anything else on this screenshot.
+
+        With nothing to download ("Download basic assets (0B)") Confirm goes on to the title
+        screen, and that is tapped. With any other size nothing is tapped: which assets to
+        download is the player's choice. ALAS then waits on the dialog until its stuck check
+        raises, and the log says why.
+
+        Returns:
+            bool: If the dialog is on screen, whether or not it was tapped.
+        """
+        if not self.appear(LOGIN_ASSETS_DOWNLOAD, offset=(30, 30)):
+            return False
+
+        # The size is grey text on a see-through panel, so it matches less well than the title.
+        if not self.appear(LOGIN_ASSETS_DOWNLOAD_ZERO, offset=(30, 30), similarity=0.8):
+            timer = self.get_interval_timer('LOGIN_ASSETS_DOWNLOAD_NOT_ZERO', interval=30)
+            if timer.reached():
+                timer.reset()
+                logger.warning('Download Game Assets dialog: the size to download was not read as 0B, '
+                               'not confirming. Choose in the game what to download; '
+                               'ALAS taps nothing on this dialog')
+            return True
+
+        timer = self.get_interval_timer(LOGIN_ASSETS_DOWNLOAD, interval=5)
+        if timer.reached():
+            timer.reset()
+            logger.info('Download Game Assets dialog with nothing to download (0B), confirm')
+            self.device.click(LOGIN_ASSETS_DOWNLOAD)
+        return True
+
     _hot_fix_check_wait = Timer(6)
 
     def handle_urgent_commission(self, drop=None):

@@ -510,6 +510,30 @@ def test_native_three_failure_stop_with_unavailable_sidecar(monkeypatch):
     assert not runner._ai_pause
 
 
+def test_restart_that_keeps_failing_stops_the_scheduler_although_the_sidecar_says_skip(monkeypatch):
+    # Recorded live on 2026-11-18 (loop-haiku-main-20261118b): the game could not be started, and
+    # the sidecar answered "skip" on the second failure of Restart and of Commission. A skip moves a
+    # task's next run; it does not clear the failure count, so the third failed Restart still stops
+    # the scheduler. The live run was stopped by hand before that; this is its order of tasks.
+    order = iter(['Commission', 'Restart', 'Restart', 'Commission', 'Restart'])
+
+    def notify(event, payload):
+        if event != 'task_failed':
+            return None
+        return {'action': 'skip'} if payload['count'] >= 1 else {'action': 'continue'}
+
+    runner, client = _task_failed_runner(monkeypatch, [False] * 5, notify)
+    runner.get_next_task = MagicMock(side_effect=lambda: next(order))
+    monkeypatch.setattr(alas, 'handle_notify', MagicMock())
+    with pytest.raises(SystemExit) as stopped:
+        runner.loop()
+    assert stopped.value.code == 1
+    assert runner.run.call_count == 5
+    assert runner.failure_record == {'Commission': 2, 'Restart': 3}
+    assert [(payload['task'], payload['count']) for payload in _task_failed_calls(client)] == [
+        ('Commission', 0), ('Restart', 0), ('Restart', 1), ('Commission', 1), ('Restart', 2)]
+
+
 def _task_failed_runner(monkeypatch, run_results, notify, device=None, handle_error=True):
     """Loop-level runner on a fake config: no profile, no device, no network."""
     runner = AzurLaneAutoScript('fake_task_failed')
