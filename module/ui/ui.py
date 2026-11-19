@@ -554,6 +554,9 @@ class UI(InfoHandler):
         # Login
         if self.appear_then_click(LOGIN_CHECK, offset=(30, 30), interval=3):
             return True
+        # Before MAINTENANCE_ANNOUNCE: that matches the X of this dialog, which exits the game.
+        if self.handle_assets_download():
+            return True
         if self.appear_then_click(MAINTENANCE_ANNOUNCE, offset=(30, 30), interval=3):
             return True
         # rerun event select page

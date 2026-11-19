@@ -74,6 +74,9 @@ class LoginHandler(UI):
                 self.device.click(BACK_ARROW)
                 continue
             # Updates and maintenance
+            # Before MAINTENANCE_ANNOUNCE: that matches the X of this dialog, which exits the game.
+            if self.handle_assets_download():
+                continue
             if self.appear_then_click(MAINTENANCE_ANNOUNCE, offset=(30, 30), interval=5):
                 continue
             if self.appear_then_click(LOGIN_GAME_UPDATE, offset=(30, 30), interval=5):
