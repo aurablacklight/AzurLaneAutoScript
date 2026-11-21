@@ -10,6 +10,34 @@ from module.ui_white.assets import POPUP_CONFIRM_WHITE_BATTLEPASS
 
 
 class BattlePass(Combat, UI):
+    def battle_pass_entrance_appear(self, skip_first_screenshot=True):
+        """
+        Returns:
+            bool: If the battle pass entrance appears.
+
+        Page:
+            in: page_reward
+        """
+        # The column holding the entrance is still sliding in when page_reward is first
+        # recognised, and it is see-through, so the first screenshot may not match.
+        # Look again for a short while before giving up.
+        timeout = Timer(1.5, count=3).start()
+        shots = 0
+        while 1:
+            if skip_first_screenshot:
+                skip_first_screenshot = False
+            else:
+                self.device.screenshot()
+            shots += 1
+
+            if self.appear(REWARD_GOTO_BATTLE_PASS, offset=(50, 150)):
+                if shots > 1:
+                    logger.info(f'Battle pass entrance found on screenshot {shots}')
+                return True
+            if timeout.reached():
+                logger.info(f'Battle pass entrance not found in {shots} screenshots')
+                return False
+
     def battle_pass_red_dot_appear(self):
         """
         Returns:
@@ -18,7 +46,7 @@ class BattlePass(Combat, UI):
         Page:
             in: page_reward
         """
-        if self.appear(REWARD_GOTO_BATTLE_PASS, offset=(50, 150)):
+        if self.battle_pass_entrance_appear():
             # Load button offset from REWARD_GOTO_BATTLE_PASS,
             # because entrance may not be the top one.
             BATTLE_PASS_RED_DOT.load_offset(REWARD_GOTO_BATTLE_PASS)
