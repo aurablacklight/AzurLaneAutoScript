@@ -221,6 +221,28 @@ matches that X: upstream taps it, the game closes, and the Restart task fails ev
   They sit in the `cn` folder because ALAS generates a button only from a file there; the
   dialog was not seen on the other servers, where the text differs and nothing will match.
 
+### Battle pass entrance (EN)
+
+The Freebies task collects battle pass rewards only if it finds the entrance on the reward page
+(`REWARD_GOTO_BATTLE_PASS`, the "Cruise Missions" icon in the column right of the reward list).
+EN had no image of its own and used the CN one, which scores 0.836 to 0.901 on recorded EN
+reward pages against a threshold of 0.85, so the entrance was missed in 6 of 12 main-account
+runs from 2026-11-17 to 2026-11-19. The icon sits on a see-through column over the main page,
+so the secretary and background behind it change the score, and the column is still sliding in
+when ALAS first recognises the page.
+
+- `assets/en/ui/REWARD_GOTO_BATTLE_PASS.png` is the icon cut from the EN client (2026-11-19,
+  9.3.23) where it settles, at (595, 101). It scores 0.919 to 0.990 on the 14 other recorded
+  reward pages, and at most 0.41 on the 230 other distinct screens recorded in those runs.
+- `assets/en/freebies/BATTLE_PASS_RED_DOT.png` moves the red-dot sample with it, to where the
+  CN image's offset already put it on EN, so whether the dot is read is unchanged.
+- `battle_pass_entrance_appear` in `module/freebies/battle_pass.py` looks again for up to 1.5
+  seconds (and at least three screenshots) before it logs `No battle pass entrance`. It logs
+  `Battle pass entrance found on screenshot N` when it needed more than one.
+- **Verified on recorded frames only, not on the device.** No run kept the screenshot of a check
+  that missed, so that the old image failed on those screenshots is inferred from the frames of
+  the same page, not seen. Qualify it with a real run and read the two log lines above.
+
 ### Updates
 
 `deploy/template` and every `config/deploy.template*.yaml` name this fork and its branch and set
